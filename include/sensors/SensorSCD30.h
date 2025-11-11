@@ -48,7 +48,7 @@ public:
 
     bool calibrate(float reference = 400) override {
         if (!active) return false;
-        return scd30.setForcedRecalibrationFactor((uint16_t)reference);
+        return scd30.forceRecalibrationWithReference((uint16_t)reference);
     }
 
     bool isActive() override { return active; }

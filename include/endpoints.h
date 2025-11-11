@@ -6,4 +6,6 @@ void handleConfiguracion();
 void habldePostConfig();
 void handleData();
 void handleSCD30Calibration();
+void handleSettings();
+void handleRestart();
 #endif // ENDPOINTS_H

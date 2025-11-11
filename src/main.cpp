@@ -17,7 +17,13 @@
 #include "endpoints.h"
 #include "configFile.h"
 #include "otaUpdater.h"
-#include "sensors/SensorFactory.h"
+
+#ifdef SENSOR_MULTI
+  #include "SensorManager.h"
+  SensorManager sensorMgr;
+#else
+  #include "sensors/SensorFactory.h"
+#endif
 
 #ifdef ENABLE_RS485
   #include "RS485Manager.h"
@@ -41,17 +47,24 @@ void setup() {
 
   createConfigFile();
 
-  // Inicializar sensor según build flag
-  sensor = SensorFactory::createSensor();
-  if (sensor) {
-    if (sensor->init()) {
-      Serial.printf("Sensor %s inicializado correctamente\n", sensor->getSensorType());
+  #ifdef SENSOR_MULTI
+    // Modo multi-sensor: cargar configuración y crear múltiples sensores
+    JsonDocument configDoc = loadConfig();
+    sensorMgr.loadFromConfig(configDoc);
+    Serial.printf("Modo multi-sensor: %d sensores activos\n", sensorMgr.getSensorCount());
+  #else
+    // Modo single sensor (backward compatible)
+    sensor = SensorFactory::createSensor();
+    if (sensor) {
+      if (sensor->init()) {
+        Serial.printf("Sensor %s inicializado correctamente\n", sensor->getSensorType());
+      } else {
+        Serial.printf("Error inicializando sensor %s\n", sensor->getSensorType());
+      }
     } else {
-      Serial.printf("Error inicializando sensor %s\n", sensor->getSensorType());
+      Serial.println("Error: No se pudo crear el sensor!");
     }
-  } else {
-    Serial.println("Error: No se pudo crear el sensor!");
-  }
+  #endif
 
   #ifdef ENABLE_RS485
     // Inicializar RS485 (sin DE/RE = puenteado para TX permanente)
@@ -64,8 +77,10 @@ void setup() {
   server.on("/actual", HTTP_GET, handleMediciones);
   server.on("/config", HTTP_GET, handleConfiguracion);
   server.on("/config", HTTP_POST, habldePostConfig);
-  server.on("/data", HTTP_GET,handleData);
+  server.on("/data", HTTP_GET, handleData);
   server.on("/calibrate-scd30", HTTP_GET, handleSCD30Calibration);
+  server.on("/settings", HTTP_GET, handleSettings);
+  server.on("/restart", HTTP_POST, handleRestart);
     // Add handler for undefined routes
   server.onNotFound([]() {
       // Redirect all undefined routes to root page
@@ -123,31 +138,63 @@ void loop() {
   if (currentMillis - lastSendTime >= 10000) {
     lastSendTime = currentMillis;
 
-    float temperature = 99, humidity = 100, co2 = 999999;
+    #ifdef SENSOR_MULTI
+      // Modo multi-sensor: leer y enviar todos los sensores
+      sensorMgr.readAll();
 
-    if (sensor && sensor->isActive() && sensor->dataReady()) {
-      if (sensor->read()) {
-        temperature = sensor->getTemperature();
-        humidity = sensor->getHumidity();
-        co2 = sensor->getCO2();
+      Serial.printf("Free heap before sending: %d bytes\n", ESP.getFreeHeap());
 
-        Serial.printf("[%s] Temp: %.1f°C, Hum: %.1f%%, CO2: %.0fppm\n",
-                     sensor->getSensorType(), temperature, humidity, co2);
-      } else {
-        Serial.println("Error leyendo el sensor!");
-        return;
+      for (auto* s : sensorMgr.getSensors()) {
+        if (s->isActive()) {
+          float temperature = s->getTemperature();
+          float humidity = s->getHumidity();
+          float co2 = s->getCO2();
+
+          String sensorId = sensorMgr.getSensorId(s);
+
+          Serial.printf("[%s] Temp: %.1f°C, Hum: %.1f%%, CO2: %.0fppm\n",
+                       sensorId.c_str(), temperature, humidity, co2);
+
+          // Enviar a Grafana
+          sendDataGrafana(temperature, humidity, co2, sensorId.c_str());
+
+          #ifdef ENABLE_RS485
+            // Enviar por RS485
+            rs485.sendSensorData(temperature, humidity, co2, sensorId.c_str());
+          #endif
+        }
       }
-    } else {
-      Serial.println("Sensor no listo, esperando...");
-    }
 
-    Serial.printf("Free heap before sending: %d bytes\n", ESP.getFreeHeap());
-    sendDataGrafana(temperature, humidity, co2, sensor ? sensor->getSensorType() : "Unknown");
-    Serial.printf("Free heap after sending: %d bytes\n", ESP.getFreeHeap());
+      Serial.printf("Free heap after sending: %d bytes\n", ESP.getFreeHeap());
 
-    #ifdef ENABLE_RS485
-      // También enviar datos por RS485
-      rs485.sendSensorData(temperature, humidity, co2, sensor ? sensor->getSensorType() : "Unknown");
+    #else
+      // Modo single sensor (backward compatible)
+      float temperature = 99, humidity = 100, co2 = 999999;
+
+      if (sensor && sensor->isActive() && sensor->dataReady()) {
+        if (sensor->read()) {
+          temperature = sensor->getTemperature();
+          humidity = sensor->getHumidity();
+          co2 = sensor->getCO2();
+
+          Serial.printf("[%s] Temp: %.1f°C, Hum: %.1f%%, CO2: %.0fppm\n",
+                       sensor->getSensorType(), temperature, humidity, co2);
+        } else {
+          Serial.println("Error leyendo el sensor!");
+          return;
+        }
+      } else {
+        Serial.println("Sensor no listo, esperando...");
+      }
+
+      Serial.printf("Free heap before sending: %d bytes\n", ESP.getFreeHeap());
+      sendDataGrafana(temperature, humidity, co2, sensor ? sensor->getSensorType() : "Unknown");
+      Serial.printf("Free heap after sending: %d bytes\n", ESP.getFreeHeap());
+
+      #ifdef ENABLE_RS485
+        // También enviar datos por RS485
+        rs485.sendSensorData(temperature, humidity, co2, sensor ? sensor->getSensorType() : "Unknown");
+      #endif
     #endif
   }
   delay(10);

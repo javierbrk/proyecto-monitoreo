@@ -5,6 +5,7 @@
 #include "endpoints.h"
 #include "globals.h"
 #include "configFile.h"
+#include "webConfigPage.h"
 
 #include <ArduinoJson.h>
 
@@ -89,35 +90,40 @@ void handleConfiguracion() {
 }
 
 void habldePostConfig() {
-    Serial.println("set config ... ");
-    
-    if (server.hasArg("plain")) {
-      String jsonString = server.arg("plain");
-      JsonDocument doc;
-      DeserializationError error = deserializeJson(doc, jsonString);
+    Serial.println("Updating configuration...");
 
-      if (error) {
-        Serial.print("deserializeJson() failed: ");
-        Serial.println(error.c_str());
-        server.send(400, "text/plain", "Invalid JSON format");
-        return;
-      }
-
-      // Extract SSID and password from JSON
-      const char* new_ssid = doc["ssid"];
-      const char* new_password = doc["passwd"];
-
-      if (new_ssid && strlen(new_ssid) > 0 && strcmp(new_ssid, "ToChange") != 0) {
-        wifiManager.onChange(String(new_ssid), String(new_password));
-        Serial.printf("New SSID: %s\n, new password %s \n", new_ssid, new_password);
-        server.send(200, "text/plain", "Configuration updated. Attempting to connect to " + String(new_ssid));
-      } else {
-        Serial.printf("SSID is empty in received JSON\n");
-        server.send(400, "text/plain", "SSID cannot be empty");
-      }
-    } else {
-      Serial.println("no json");
+    if (!server.hasArg("plain")) {
       server.send(400, "text/plain", "No JSON data received");
+      return;
+    }
+
+    String jsonString = server.arg("plain");
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, jsonString);
+
+    if (error) {
+      Serial.print("deserializeJson() failed: ");
+      Serial.println(error.c_str());
+      server.send(400, "text/plain", "Invalid JSON format");
+      return;
+    }
+
+    // Update WiFi if SSID changed
+    const char* new_ssid = doc["ssid"];
+    const char* new_password = doc["passwd"];
+
+    if (new_ssid && strlen(new_ssid) > 0 && strcmp(new_ssid, "ToChange") != 0) {
+      wifiManager.onChange(String(new_ssid), String(new_password));
+      Serial.printf("WiFi updated: %s\n", new_ssid);
+    }
+
+    // Save complete config to SPIFFS
+    if (updateConfig(doc)) {
+      server.send(200, "text/plain", "Configuration updated successfully. Some changes require restart.");
+      Serial.println("Configuration saved to SPIFFS");
+    } else {
+      server.send(500, "text/plain", "Failed to save configuration");
+      Serial.println("Failed to save configuration");
     }
   }
 
@@ -162,4 +168,14 @@ void handleSCD30Calibration() {
 
   server.send(httpStatus, "application/json", response);
   Serial.println("Calibration response sent: " + response);
+}
+
+void handleSettings() {
+  server.send(200, "text/html", getConfigPageHTML());
+}
+
+void handleRestart() {
+  server.send(200, "text/plain", "Restarting ESP32...");
+  delay(1000);
+  ESP.restart();
 }
