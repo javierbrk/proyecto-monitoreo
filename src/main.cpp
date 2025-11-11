@@ -19,6 +19,11 @@
 #include "otaUpdater.h"
 #include "sensors/SensorFactory.h"
 
+#ifdef ENABLE_RS485
+  #include "RS485Manager.h"
+  RS485Manager rs485;
+#endif
+
 unsigned long lastUpdateCheck = 0;
 unsigned long lastSendTime = 0;
 
@@ -47,6 +52,12 @@ void setup() {
   } else {
     Serial.println("Error: No se pudo crear el sensor!");
   }
+
+  #ifdef ENABLE_RS485
+    // Inicializar RS485 (sin DE/RE = puenteado para TX permanente)
+    rs485.init(16, 17, 9600);  // RX, TX, Baud (DE/RE opcionales)
+    Serial.println("RS485 habilitado para transmisión de datos");
+  #endif
 
   clientSecure.setInsecure(); 
 
@@ -133,6 +144,11 @@ void loop() {
     Serial.printf("Free heap before sending: %d bytes\n", ESP.getFreeHeap());
     sendDataGrafana(temperature, humidity, co2, sensor ? sensor->getSensorType() : "Unknown");
     Serial.printf("Free heap after sending: %d bytes\n", ESP.getFreeHeap());
+
+    #ifdef ENABLE_RS485
+      // También enviar datos por RS485
+      rs485.sendSensorData(temperature, humidity, co2, sensor ? sensor->getSensorType() : "Unknown");
+    #endif
   }
   delay(10);
 }
