@@ -9,114 +9,166 @@ const char* getConfigPageHTML() {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Configuración - Monitor</title>
     <style>
+        :root {
+            --altermundi-green: #55d400;
+            --altermundi-orange: #F39100;
+            --altermundi-blue: #0198fe;
+            --gray-dark: #333;
+            --gray-medium: #666;
+            --gray-light: #f5f5f5;
+        }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            font-family: Arial, sans-serif;
-            background: #f5f5f5;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            background: linear-gradient(135deg, #f5f5f5 0%, #e8e8e8 100%);
             padding: 20px;
+            min-height: 100vh;
         }
         .container {
-            max-width: 800px;
+            max-width: 850px;
             margin: 0 auto;
             background: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1), 0 1px 3px rgba(0,0,0,0.08);
         }
         h1 {
-            color: #333;
-            margin-bottom: 20px;
-            border-bottom: 2px solid #4CAF50;
-            padding-bottom: 10px;
+            color: var(--gray-dark);
+            margin-bottom: 10px;
+            border-bottom: 3px solid var(--altermundi-green);
+            padding-bottom: 12px;
+            font-size: 28px;
+        }
+        h1::before {
+            content: "⚙️ ";
+        }
+        .subtitle {
+            color: var(--gray-medium);
+            font-size: 14px;
+            margin-bottom: 25px;
         }
         h2 {
-            color: #555;
+            color: var(--altermundi-green);
             margin-top: 20px;
-            margin-bottom: 10px;
+            margin-bottom: 15px;
             font-size: 18px;
+            font-weight: 600;
         }
         .section {
-            margin-bottom: 20px;
-            padding: 15px;
+            margin-bottom: 25px;
+            padding: 20px;
             background: #fafafa;
-            border-radius: 4px;
+            border-radius: 8px;
+            border-left: 4px solid var(--altermundi-green);
+            transition: all 0.3s ease;
+        }
+        .section:hover {
+            box-shadow: 0 2px 8px rgba(85, 212, 0, 0.15);
         }
         .form-group {
-            margin-bottom: 15px;
+            margin-bottom: 18px;
         }
         label {
             display: block;
-            margin-bottom: 5px;
-            color: #555;
-            font-weight: bold;
+            margin-bottom: 6px;
+            color: var(--gray-dark);
+            font-weight: 600;
+            font-size: 14px;
         }
         input[type="text"], input[type="number"], select {
             width: 100%;
-            padding: 8px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
+            padding: 10px 12px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
             font-size: 14px;
+            transition: border-color 0.3s ease;
+        }
+        input[type="text"]:focus, input[type="number"]:focus, select:focus {
+            outline: none;
+            border-color: var(--altermundi-green);
         }
         input[type="checkbox"] {
-            width: 18px;
-            height: 18px;
-            margin-right: 8px;
+            width: 20px;
+            height: 20px;
+            margin-right: 10px;
             vertical-align: middle;
+            cursor: pointer;
         }
         .checkbox-label {
             display: inline;
             font-weight: normal;
+            cursor: pointer;
         }
         .sensor-item {
             background: white;
-            padding: 10px;
-            margin-bottom: 10px;
-            border-radius: 4px;
-            border-left: 3px solid #4CAF50;
+            padding: 15px;
+            margin-bottom: 12px;
+            border-radius: 8px;
+            border-left: 4px solid var(--altermundi-orange);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            transition: transform 0.2s ease;
+        }
+        .sensor-item:hover {
+            transform: translateX(5px);
         }
         .btn {
-            background: #4CAF50;
+            background: var(--altermundi-green);
             color: white;
-            padding: 12px 24px;
+            padding: 12px 28px;
             border: none;
-            border-radius: 4px;
+            border-radius: 6px;
             cursor: pointer;
             font-size: 16px;
+            font-weight: 600;
             margin-right: 10px;
+            margin-top: 10px;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 4px rgba(85, 212, 0, 0.3);
         }
-        .btn:hover { background: #45a049; }
+        .btn:hover {
+            background: #48b800;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(85, 212, 0, 0.4);
+        }
         .btn-secondary {
-            background: #666;
+            background: var(--gray-medium);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
         }
-        .btn-secondary:hover { background: #555; }
+        .btn-secondary:hover {
+            background: #555;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+        }
         .message {
-            padding: 12px;
-            margin-top: 15px;
-            border-radius: 4px;
+            padding: 14px 18px;
+            margin-top: 20px;
+            border-radius: 8px;
             display: none;
+            font-weight: 500;
         }
         .message.success {
-            background: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
+            background: #d4f4dd;
+            color: #1e7e34;
+            border: 2px solid var(--altermundi-green);
         }
         .message.error {
-            background: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
+            background: #ffe6e6;
+            color: #c82333;
+            border: 2px solid #dc3545;
         }
         .message.warning {
-            background: #fff3cd;
+            background: #fff8e1;
             color: #856404;
-            border: 1px solid #ffeeba;
+            border: 2px solid var(--altermundi-orange);
         }
         .loading {
             text-align: center;
-            padding: 20px;
-            color: #666;
+            padding: 40px 20px;
+            color: var(--altermundi-green);
+            font-size: 18px;
+            font-weight: 500;
         }
         .info-text {
-            color: #666;
+            color: var(--gray-medium);
             font-size: 12px;
             margin-top: 3px;
         }
@@ -132,6 +184,7 @@ const char* getConfigPageHTML() {
 <body>
     <div class="container">
         <h1>Configuración del Sistema</h1>
+        <div class="subtitle">AlterMundi - La pata tecnológica de ese otro mundo posible</div>
         <div id="loading" class="loading">Cargando configuración...</div>
 
         <form id="configForm" style="display:none;">

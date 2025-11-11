@@ -35,41 +35,74 @@ unsigned long lastSendTime = 0;
 
 #ifndef UNIT_TEST
 
+void printBanner() {
+  Serial.println("\n\n");
+  Serial.println("  ╔═══════════════════════════════════════════════════╗");
+  Serial.println("  ║                                                   ║");
+  Serial.println("  ║      *---*         ALTERMUNDI          *---*      ║");
+  Serial.println("  ║     /     \\                           /     \\     ║");
+  Serial.println("  ║    *   *   *    Proyecto Monitoreo  *   *   *    ║");
+  Serial.println("  ║     \\ | | /         Sensores          \\ | | /     ║");
+  Serial.println("  ║      *---*                             *---*      ║");
+  Serial.println("  ║                                                   ║");
+  Serial.println("  ║   La pata tecnológica de ese otro mundo posible  ║");
+  Serial.println("  ╚═══════════════════════════════════════════════════╝");
+  Serial.println();
+}
+
 void setup() {
   Serial.begin(115200);
+  delay(500);  // Esperar estabilización serial
 
-  Serial.println("Conectado a WiFi");
+  printBanner();
+
+  Serial.println("[INFO] Iniciando sistema...");
   configTime(0, 0, "pool.ntp.org", "time.nist.gov");
 
+  Serial.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  Serial.println("  INICIALIZACIÓN DEL SISTEMA");
+  Serial.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
   if (!SPIFFS.begin(true)) {
-    Serial.println("Error montando SPIFFS");
+    Serial.println("[ERROR] ✗ No se pudo montar SPIFFS");
+  } else {
+    Serial.println("[OK]    ✓ SPIFFS montado correctamente");
   }
 
   createConfigFile();
 
+  Serial.println("\n[INFO] Inicializando sensores...");
   #ifdef SENSOR_MULTI
-    // Modo multi-sensor: cargar configuración y crear múltiples sensores
     JsonDocument configDoc = loadConfig();
     sensorMgr.loadFromConfig(configDoc);
-    Serial.printf("Modo multi-sensor: %d sensores activos\n", sensorMgr.getSensorCount());
+    int sensorCount = sensorMgr.getSensorCount();
+    Serial.printf("[OK]    ✓ Modo multi-sensor: %d sensor%s activo%s\n",
+                  sensorCount, sensorCount != 1 ? "es" : "", sensorCount != 1 ? "s" : "");
+
+    // Listar sensores activos
+    for (auto* s : sensorMgr.getSensors()) {
+      if (s && s->isActive()) {
+        String sensorId = sensorMgr.getSensorId(s);
+        Serial.printf("        ├─ %s\n", sensorId.c_str());
+      }
+    }
   #else
-    // Modo single sensor (backward compatible)
     sensor = SensorFactory::createSensor();
     if (sensor) {
       if (sensor->init()) {
-        Serial.printf("Sensor %s inicializado correctamente\n", sensor->getSensorType());
+        Serial.printf("[OK]    ✓ Sensor %s inicializado\n", sensor->getSensorType());
       } else {
-        Serial.printf("Error inicializando sensor %s\n", sensor->getSensorType());
+        Serial.printf("[ERROR] ✗ Error inicializando %s\n", sensor->getSensorType());
       }
     } else {
-      Serial.println("Error: No se pudo crear el sensor!");
+      Serial.println("[ERROR] ✗ No se pudo crear el sensor");
     }
   #endif
 
   #ifdef ENABLE_RS485
-    // Inicializar RS485 (sin DE/RE = puenteado para TX permanente)
-    rs485.init(16, 17, 9600);  // RX, TX, Baud (DE/RE opcionales)
-    Serial.println("RS485 habilitado para transmisión de datos");
+    Serial.println("\n[INFO] Configurando RS485...");
+    rs485.init(16, 17, 9600);
+    Serial.println("[OK]    ✓ RS485 habilitado (TX: GPIO17, RX: GPIO16, 9600 baud)");
   #endif
 
   clientSecure.setInsecure(); 
@@ -94,19 +127,25 @@ void setup() {
 
   server.enableCORS(true);
 
-  // Optional: Configure timeouts and retries
-  wifiManager.setConnectionTimeout(15000);  // 15 seconds
+  Serial.println("\n[INFO] Configurando WiFi Manager...");
+  wifiManager.setConnectionTimeout(15000);
   wifiManager.setMaxRetries(8);
-  wifiManager.setValidationTimeout(30000);  // 30 seconds
+  wifiManager.setValidationTimeout(30000);
   wifiManager.init(&server);
-    
-  Serial.println("Setup complete!");
-  Serial.println("Access Point: " + wifiManager.getAPSSID());
-  Serial.println("Connect to the AP and go to http://192.168.16.10 to configure WiFi");
+  Serial.println("[OK]    ✓ WiFi Manager inicializado");
 
   server.begin();
-  Serial.println("Servidor web iniciado en el puerto 80");
-    
+  Serial.println("[OK]    ✓ Servidor web iniciado en puerto 80");
+
+  Serial.println("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  Serial.println("  SISTEMA LISTO");
+  Serial.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  Serial.println("\n  Punto de Acceso: " + wifiManager.getAPSSID());
+  Serial.println("  Configuración:   http://192.168.16.10");
+  Serial.println("  Panel Web:       http://<IP>/settings");
+  Serial.println("  Datos Sensores:  http://<IP>/data");
+  Serial.println("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+
 }
 
 void loop() {
