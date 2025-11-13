@@ -56,15 +56,15 @@ void onMeshDataReceived(const uint8_t* senderMAC, float temp, float hum, float c
 }
 
 String detectRole() {
-  Serial.println("\n[AUTO] Detectando rol del dispositivo...");
+  Serial.println("\n[→ INFO] Auto-detectando rol del dispositivo...");
 
   // 1. Check if WiFi is connected
   if (!wifiManager.isOnline()) {
-    Serial.println("[AUTO] → Sin conexión WiFi → SENSOR mode");
+    Serial.println("  └─ Sin conexión WiFi → SENSOR mode");
     return "sensor";
   }
 
-  Serial.println("[AUTO] → WiFi conectado, verificando acceso a Grafana...");
+  Serial.println("  └─ WiFi conectado, verificando acceso a Grafana...");
 
   // 2. Test Grafana connectivity
   JsonDocument config = loadConfig();
@@ -78,10 +78,10 @@ String detectRole() {
   http.end();
 
   if (httpCode > 0) {
-    Serial.printf("[AUTO] → Grafana accesible (HTTP %d) → GATEWAY mode\n", httpCode);
+    Serial.printf("  └─ Grafana accesible (HTTP %d) → GATEWAY mode\n", httpCode);
     return "gateway";
   } else {
-    Serial.printf("[AUTO] → Grafana inaccesible (error %d) → SENSOR mode\n", httpCode);
+    Serial.printf("  └─ Grafana inaccesible (error %d) → SENSOR mode\n", httpCode);
     return "sensor";
   }
 }
@@ -108,7 +108,7 @@ void setup() {
 
   printBanner();
 
-  Serial.println("[INFO] Iniciando sistema...");
+  Serial.println("[→ INFO] Iniciando sistema...");
   configTime(0, 0, "pool.ntp.org", "time.nist.gov");
 
   Serial.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
@@ -116,45 +116,45 @@ void setup() {
   Serial.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
   if (!SPIFFS.begin(true)) {
-    Serial.println("[ERROR] ✗ No se pudo montar SPIFFS");
+    Serial.println("[✗ ERR ] No se pudo montar SPIFFS");
   } else {
-    Serial.println("[OK]    ✓ SPIFFS montado correctamente");
+    Serial.println("[✓ OK  ] SPIFFS montado correctamente");
   }
 
   createConfigFile();
 
-  Serial.println("\n[INFO] Inicializando sensores...");
+  Serial.println("\n[→ INFO] Inicializando sensores...");
   #ifdef SENSOR_MULTI
     JsonDocument configDoc = loadConfig();
     sensorMgr.loadFromConfig(configDoc);
     int sensorCount = sensorMgr.getSensorCount();
-    Serial.printf("[OK]    ✓ Modo multi-sensor: %d sensor%s activo%s\n",
+    Serial.printf("[✓ OK  ] Modo multi-sensor: %d sensor%s activo%s\n",
                   sensorCount, sensorCount != 1 ? "es" : "", sensorCount != 1 ? "s" : "");
 
     // Listar sensores activos
     for (auto* s : sensorMgr.getSensors()) {
       if (s && s->isActive()) {
         String sensorId = sensorMgr.getSensorId(s);
-        Serial.printf("        ├─ %s\n", sensorId.c_str());
+        Serial.printf("  └─ %s\n", sensorId.c_str());
       }
     }
   #else
     sensor = SensorFactory::createSensor();
     if (sensor) {
       if (sensor->init()) {
-        Serial.printf("[OK]    ✓ Sensor %s inicializado\n", sensor->getSensorType());
+        Serial.printf("[✓ OK  ] Sensor %s inicializado\n", sensor->getSensorType());
       } else {
-        Serial.printf("[ERROR] ✗ Error inicializando %s\n", sensor->getSensorType());
+        Serial.printf("[✗ ERR ] Error inicializando %s\n", sensor->getSensorType());
       }
     } else {
-      Serial.println("[ERROR] ✗ No se pudo crear el sensor");
+      Serial.println("[✗ ERR ] No se pudo crear el sensor");
     }
   #endif
 
   #ifdef ENABLE_RS485
-    Serial.println("\n[INFO] Configurando RS485...");
+    Serial.println("\n[→ INFO] Configurando RS485...");
     rs485.init(16, 17, 9600);
-    Serial.println("[OK]    ✓ RS485 habilitado (TX: GPIO17, RX: GPIO16, 9600 baud)");
+    Serial.println("[✓ OK  ] RS485 habilitado (TX: GPIO17, RX: GPIO16, 9600 baud)");
   #endif
 
   clientSecure.setInsecure(); 
@@ -183,15 +183,15 @@ void setup() {
 
   server.enableCORS(true);
 
-  Serial.println("\n[INFO] Configurando WiFi Manager...");
+  Serial.println("\n[→ INFO] Configurando WiFi Manager...");
   wifiManager.setConnectionTimeout(15000);
   wifiManager.setMaxRetries(8);
   wifiManager.setValidationTimeout(30000);
   wifiManager.init(&server);
-  Serial.println("[OK]    ✓ WiFi Manager inicializado");
+  Serial.println("[✓ OK  ] WiFi Manager inicializado");
 
   #ifdef ENABLE_ESPNOW
-    Serial.println("\n[INFO] Configurando ESP-NOW...");
+    Serial.println("\n[→ INFO] Configurando ESP-NOW...");
     JsonDocument espnowConfigDoc = loadConfig();
     bool espnowEnabled = espnowConfigDoc["espnow_enabled"] | false;
 
@@ -201,7 +201,7 @@ void setup() {
       String espnowMode;
 
       if (forcedMode != "") {
-        Serial.printf("[INFO] Modo forzado: %s\n", forcedMode.c_str());
+        Serial.printf("[→ INFO] Modo forzado: %s\n", forcedMode.c_str());
         espnowMode = forcedMode;
       } else {
         // Auto-detection based on connectivity
@@ -212,11 +212,11 @@ void setup() {
 
       // Validate channel is in valid range (1-13)
       if (espnowChannel < 1 || espnowChannel > 13) {
-        Serial.printf("[WARN] Canal inválido %d, usando canal 1\n", espnowChannel);
+        Serial.printf("[⚠ WARN] Canal inválido %d, usando canal 1\n", espnowChannel);
         espnowChannel = 1;
       }
 
-      Serial.printf("[INFO] Modo ESP-NOW: %s (canal %d)\n", espnowMode.c_str(), espnowChannel);
+      Serial.printf("[→ INFO] Modo ESP-NOW: %s (canal %d)\n", espnowMode.c_str(), espnowChannel);
 
       if (espnowMode == "gateway") {
         // Gateway: use current WiFi channel if connected, otherwise use configured channel
@@ -224,41 +224,41 @@ void setup() {
           uint8_t wifiChannel = WiFi.channel();
           if (wifiChannel >= 1 && wifiChannel <= 13) {
             espnowChannel = wifiChannel;
-            Serial.printf("[INFO] Gateway usando canal WiFi: %d\n", espnowChannel);
+            Serial.printf("[→ INFO] Gateway usando canal WiFi: %d\n", espnowChannel);
           } else {
-            Serial.printf("[WARN] Canal WiFi inválido (%d), usando canal configurado: %d\n", wifiChannel, espnowChannel);
+            Serial.printf("[⚠ WARN] Canal WiFi inválido (%d), usando canal configurado: %d\n", wifiChannel, espnowChannel);
           }
         } else {
-          Serial.printf("[INFO] WiFi no conectado, gateway usando canal configurado: %d\n", espnowChannel);
+          Serial.printf("[→ INFO] WiFi no conectado, gateway usando canal configurado: %d\n", espnowChannel);
         }
       }
 
       if (espnowMgr.init(espnowMode, espnowChannel)) {
-        Serial.println("[OK]    ✓ ESP-NOW inicializado");
+        Serial.println("[✓ OK  ] ESP-NOW inicializado");
 
         if (espnowMode == "sensor") {
           // Sensor mode: attempt discovery
-          Serial.println("[INFO] Modo sensor: buscando gateway...");
+          Serial.println("[→ INFO] Modo sensor: buscando gateway...");
           if (espnowMgr.waitForDiscovery()) {
-            Serial.println("[OK]    ✓ Gateway encontrado y emparejado");
+            Serial.println("[✓ OK  ] Gateway encontrado y emparejado");
           } else {
-            Serial.println("[WARN]  ! Gateway no encontrado (reintentará automáticamente)");
+            Serial.println("[⚠ WARN] Gateway no encontrado (reintentará automáticamente)");
           }
         } else {
           // Gateway mode: register mesh data callback and start beacon
           espnowMgr.setMeshDataCallback(onMeshDataReceived);
-          Serial.println("[INFO] Modo gateway: broadcasting beacon + forwarding mesh data");
+          Serial.println("[→ INFO] Modo gateway: broadcasting beacon + forwarding mesh data");
         }
       } else {
-        Serial.println("[ERROR] ✗ Error inicializando ESP-NOW");
+        Serial.println("[✗ ERR ] Error inicializando ESP-NOW");
       }
     } else {
-      Serial.println("[INFO] ESP-NOW deshabilitado en configuración");
+      Serial.println("[→ INFO] ESP-NOW deshabilitado en configuración");
     }
   #endif
 
   server.begin();
-  Serial.println("[OK]    ✓ Servidor web iniciado en puerto 80");
+  Serial.println("[✓ OK  ] Servidor web iniciado en puerto 80");
 
   Serial.println("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
   Serial.println("  SISTEMA LISTO");

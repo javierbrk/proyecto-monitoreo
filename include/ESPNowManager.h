@@ -91,7 +91,7 @@ private:
 
     for (int i = 0; i < peerCount; i++) {
       if (peers[i].active && (now - peers[i].lastSeen) > PEER_TIMEOUT) {
-        Serial.printf("[ESP-NOW] Peer %d timed out, removing\n", i);
+        Serial.printf("[ESP-NOW] Peer %d timeout, removido\n", i);
         esp_now_del_peer(peers[i].mac);
         peers[i].active = false;
       }
@@ -128,7 +128,7 @@ private:
       }
     }
 
-    Serial.println("[ESP-NOW] Max peers reached, cannot add more");
+    Serial.println("[ESP-NOW] Límite de peers alcanzado");
     return false;
   }
 
@@ -149,7 +149,7 @@ private:
   void onDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
     // Keep minimal - runs on WiFi task
     if (status != ESP_NOW_SEND_SUCCESS) {
-      Serial.println("[ESP-NOW] Send failed");
+      Serial.println("[ESP-NOW] ✗ Envío fallido");
     }
   }
 
@@ -183,13 +183,13 @@ private:
     DiscoveryMessage* msg = (DiscoveryMessage*)data;
     int8_t rssi = msg->rssi;
 
-    Serial.printf("[ESP-NOW] Beacon from %02X:%02X:%02X:%02X:%02X:%02X (RSSI: %d dBm)\n",
+    Serial.printf("[ESP-NOW] Beacon %02X:%02X:%02X:%02X:%02X:%02X (RSSI: %d dBm)\n",
                   mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5], rssi);
 
     // Multi-gateway support: choose gateway with best RSSI
     if (pairingState != PAIRED || rssi > bestGatewayRSSI + 10) {  // 10 dBm hysteresis
       if (rssi > bestGatewayRSSI || pairingState != PAIRED) {
-        Serial.printf("[ESP-NOW] Better gateway found (RSSI: %d vs %d)\n", rssi, bestGatewayRSSI);
+        Serial.printf("  └─ Mejor gateway (RSSI: %d vs %d)\n", rssi, bestGatewayRSSI);
 
         // Save gateway info
         memcpy(gatewayMAC, mac_addr, 6);
@@ -213,9 +213,9 @@ private:
         pairingState = PAIRING;
 
         if (result == ESP_OK) {
-          Serial.println("[ESP-NOW] Pairing request sent (broadcast)");
+          Serial.println("  └─ Pairing request enviado (broadcast)");
         } else {
-          Serial.printf("[ESP-NOW] Pairing request send failed: %d\n", result);
+          Serial.printf("  └─ ✗ Pairing request falló: %d\n", result);
         }
       }
     }
@@ -226,7 +226,7 @@ private:
 
     DiscoveryMessage* msg = (DiscoveryMessage*)data;
 
-    Serial.println("[ESP-NOW] Pairing ACK received!");
+    Serial.println("[ESP-NOW] ✓ Pairing ACK recibido");
 
     // Add gateway as peer
     esp_now_peer_info_t peerInfo = {};
@@ -238,25 +238,25 @@ private:
       esp_err_t result = esp_now_add_peer(&peerInfo);
       if (result == ESP_OK) {
         pairingState = PAIRED;
-        Serial.println("[ESP-NOW] Successfully paired with gateway!");
+        Serial.println("  └─ ✓ Emparejado con gateway exitosamente");
       } else {
-        Serial.printf("[ESP-NOW] Failed to add gateway as peer: %d\n", result);
+        Serial.printf("  └─ ✗ Error agregando gateway: %d\n", result);
       }
     } else {
       pairingState = PAIRED;
-      Serial.println("[ESP-NOW] Gateway already in peer list, paired!");
+      Serial.println("  └─ ✓ Gateway ya en lista, emparejado");
     }
   }
 
   void handlePairRequestReceived(const uint8_t *mac_addr, const uint8_t *data, int len) {
     if (len != sizeof(DiscoveryMessage)) return;
 
-    Serial.printf("[ESP-NOW] Pairing request from %02X:%02X:%02X:%02X:%02X:%02X\n",
+    Serial.printf("[ESP-NOW] Pairing request: %02X:%02X:%02X:%02X:%02X:%02X\n",
                   mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
 
     // Add to peer list
     if (!addPeerToList(mac_addr)) {
-      Serial.println("[ESP-NOW] Cannot add peer, max limit reached");
+      Serial.println("  └─ ✗ Límite de peers alcanzado");
       return;
     }
 
@@ -269,9 +269,9 @@ private:
 
       esp_err_t result = esp_now_add_peer(&peerInfo);
       if (result == ESP_OK) {
-        Serial.printf("[ESP-NOW] Peer added successfully (total: %d)\n", peerCount);
+        Serial.printf("  └─ ✓ Peer agregado (total: %d)\n", peerCount);
       } else {
-        Serial.printf("[ESP-NOW] Failed to add peer: %d\n", result);
+        Serial.printf("  └─ ✗ Error agregando peer: %d\n", result);
         return;
       }
     }
@@ -283,7 +283,7 @@ private:
     ack.channel = WiFi.channel();
 
     esp_now_send(mac_addr, (uint8_t*)&ack, sizeof(ack));
-    Serial.println("[ESP-NOW] Pairing ACK sent");
+    Serial.println("  └─ ✓ ACK enviado");
   }
 
   void handleDataReceived(const uint8_t *mac_addr, const uint8_t *data, int len) {
@@ -324,17 +324,17 @@ public:
 
     // Validate channel is in valid range (1-13)
     if (wifiChannel < 1 || wifiChannel > 13) {
-      Serial.printf("[ESP-NOW] ERROR: Invalid channel %d, must be 1-13\n", wifiChannel);
+      Serial.printf("[ESP-NOW] ✗ Canal inválido %d (debe ser 1-13)\n", wifiChannel);
       return false;
     }
     channel = wifiChannel;
 
-    Serial.printf("[ESP-NOW] Initializing in %s mode on channel %d\n", mode.c_str(), channel);
+    Serial.printf("[ESP-NOW] Inicializando modo %s en canal %d\n", mode.c_str(), channel);
 
     // WiFi must be initialized before ESP-NOW
     if (mode == "gateway") {
       // Gateway uses AP_STA mode (already set up by WiFiManager)
-      Serial.println("[ESP-NOW] Gateway mode: using existing WiFi configuration");
+      Serial.println("  └─ Gateway: usando config WiFi existente");
     } else {
       // Sensor mode: WiFi STA without connection
       WiFi.mode(WIFI_STA);
@@ -343,13 +343,13 @@ public:
       // CRITICAL: Force WiFi channel for sensor mode
       // Without this, sensor won't receive gateway beacons on specific channel
       esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
-      Serial.printf("[ESP-NOW] Sensor mode: WiFi STA forced to channel %d\n", channel);
+      Serial.printf("  └─ Sensor: WiFi STA forzado a canal %d\n", channel);
     }
 
     // Initialize ESP-NOW
     esp_err_t result = esp_now_init();
     if (result != ESP_OK) {
-      Serial.printf("[ESP-NOW] Init failed: %d\n", result);
+      Serial.printf("[ESP-NOW] ✗ Init falló: %d\n", result);
       return false;
     }
 
@@ -365,12 +365,12 @@ public:
     esp_now_add_peer(&broadcastPeer);
 
     enabled = true;
-    Serial.println("[ESP-NOW] Initialized successfully");
+    Serial.println("[ESP-NOW] ✓ Inicializado exitosamente");
 
     if (mode == "gateway") {
-      Serial.printf("[ESP-NOW] Gateway MAC (SoftAP): %s\n", WiFi.softAPmacAddress().c_str());
+      Serial.printf("  └─ MAC Gateway (SoftAP): %s\n", WiFi.softAPmacAddress().c_str());
     } else {
-      Serial.printf("[ESP-NOW] Sensor MAC (Station): %s\n", WiFi.macAddress().c_str());
+      Serial.printf("  └─ MAC Sensor (Station): %s\n", WiFi.macAddress().c_str());
     }
 
     return true;
