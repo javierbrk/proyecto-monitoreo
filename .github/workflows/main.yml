@@ -24,6 +24,9 @@ jobs:
     - name: Install PlatformIO
       run: pip install platformio
 
+    - name: Create constants_private.h from example
+      run: cp include/constants_private.h.example include/constants_private.h
+
     - name: Build Firmware
       run: |
         mkdir -p binarios
