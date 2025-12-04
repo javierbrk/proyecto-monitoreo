@@ -1,322 +1,250 @@
-# Proyecto Monitoreo - Multi-Sensor + RS485
+# proyecto-monitoreo
 
-Fork of [AlterMundi-MonitoreoyControl/proyecto-monitoreo](https://github.com/AlterMundi-MonitoreoyControl/proyecto-monitoreo) with RS485 connectivity and multi-sensor support.
+Sistema de monitoreo multi-sensor para ESP32 con transmisión a Grafana/InfluxDB.
 
-Branch `485_LoRa_Now` adds:
-- RS485 communication for remote sensor networks
-- Multi-sensor architecture supporting simultaneous sensors
-- OneWire support for DS18B20 temperature sensor chains
-- Runtime configuration via `config.json`
+**Versión:** 0.1.10
+**Plataforma:** ESP32 (espressif32)
 
-All active sensors propagate data to **both** Grafana (InfluxDB) and RS485 outputs.
+## Funcionalidad
 
-## Supported Sensors
+- Lectura de sensores ambientales (CO2, temperatura, humedad)
+- Transmisión HTTP a InfluxDB (formato line protocol)
+- Salida serial RS485 (opcional)
+- Mesh ESP-NOW para sensores remotos sin WiFi
+- Interfaz web de configuración
+- OTA updates desde GitHub releases
 
-| Sensor | Type | Protocol | Measured |
-|--------|------|----------|----------|
-| SCD30 | CO2/Temp/Humidity | I2C | CO2, Temperature, Humidity |
-| BME280 | Temp/Humidity/Pressure | I2C | Temperature, Humidity |
-| Capacitive | Soil Moisture | ADC | Humidity (soil) |
-| DS18B20 | Temperature | OneWire | Temperature |
+## Sensores Soportados
 
-## Build Environments
+| Sensor | Protocolo | Mide | Pines |
+|--------|-----------|------|-------|
+| SCD30 | I2C | CO2, temp, humedad | SDA=21, SCL=22 |
+| BME280 | I2C | Temp, humedad, presión* | SDA=21, SCL=22 |
+| Capacitive | ADC | Humedad de suelo | GPIO34 |
+| DS18B20 | OneWire | Temperatura | GPIO4 |
 
-```bash
-# Single sensor builds (compile-time selection)
-pio run -e esp32dev                # SCD30 only
-pio run -e esp32dev_capacitive     # Capacitive soil sensor
-pio run -e esp32dev_bme280         # BME280 only
-pio run -e esp32dev_rs485          # Capacitive + RS485
+*Presión leída pero no transmitida a Grafana
 
-# Multi-sensor build (runtime config via config.json)
-pio run -e esp32dev_multi          # All sensors + RS485
+## Instalación
+
+### Hardware
+
+**ESP32 básico:**
+```
+3.3V → Sensores I2C (VCC)
+GND  → Sensores I2C (GND)
+21   → SDA (I2C)
+22   → SCL (I2C)
+34   → Sensor capacitivo (AOUT)
+4    → OneWire data (requiere pull-up 4.7kΩ a 3.3V)
 ```
 
-### Multi-Sensor Mode
+**RS485 (opcional):**
+```
+17 → DI (MAX485)
+16 → RO (MAX485)
+```
 
-Enabled with `-DSENSOR_MULTI` build flag. Uses `SensorManager` to handle multiple simultaneous sensors configured via `config.json`.
+**ESP-NOW mesh:** Sólo requiere ESP32, sin hardware adicional.
 
-**Features:**
-- Auto-detection of OneWire sensors on bus
-- Individual sensor enable/disable without recompilation
-- Unique sensor IDs for Grafana tagging
-- Shared DallasTemperature instances for efficiency
+### Firmware
 
-## Configuration
+```bash
+# Clonar repo
+git clone https://github.com/Pablomonte/proyecto-monitoreo
+cd proyecto-monitoreo
 
-### config.json Structure
+# Copiar template de credenciales
+cp include/constants_private.h.example include/constants_private.h
 
+# Editar constants_private.h con:
+# - URL de InfluxDB
+# - Token de autenticación
+# - Repo de GitHub para OTA
+
+# Compilar y flashear
+pio run -e esp32dev --target upload
+
+# Entornos disponibles:
+# esp32dev           - SCD30 solo
+# esp32dev_multi     - Todos los sensores + RS485
+# esp32dev_espnow    - Multi-sensor + ESP-NOW mesh
+```
+
+### Configuración inicial
+
+1. ESP32 crea AP `ESP32-{MAC}`
+2. Conectar a ese AP
+3. Navegar a http://192.168.16.10/settings
+4. Configurar WiFi y sensores
+5. Guardar y reiniciar
+
+## Uso
+
+### Interfaz Web
+
+Acceder a `http://{IP_DEL_ESP32}/settings`
+
+**Endpoints disponibles:**
+- `/actual` - Lecturas actuales (JSON)
+- `/data` - Vista HTML de datos
+- `/config` - GET/POST configuración (JSON)
+- `/settings` - Formulario web de configuración
+- `/restart` - POST para reiniciar ESP32
+- `/espnow/status` - Estado ESP-NOW (JSON)
+
+### Configuración (config.json)
+
+El sistema usa `/config.json` en SPIFFS. Editable vía web o API REST.
+
+**Parámetros principales:**
 ```json
 {
+  "ssid": "WiFi_SSID",
+  "passwd": "WiFi_Password",
+  "incubator_name": "moni-AABBCCDDEE",
+  "rs485_enabled": false,
+  "rs485_rx": 16,
+  "rs485_tx": 17,
+  "rs485_baud": 9600,
+  "espnow_enabled": false,
+  "espnow_channel": 1,
+  "send_interval_ms": 30000,
   "sensors": [
-    {
-      "type": "capacitive",
-      "enabled": true,
-      "config": {
-        "pin": 34,
-        "name": "Soil1"
-      }
-    },
     {
       "type": "scd30",
       "enabled": true,
       "config": {}
-    },
-    {
-      "type": "onewire",
-      "enabled": true,
-      "config": {
-        "pin": 4,
-        "scan": true
-      }
     }
-  ],
-  "rs485_enabled": true,
-  "rs485_rx": 16,
-  "rs485_tx": 17,
-  "rs485_baud": 9600
+  ]
 }
 ```
 
-### Sensor Types
+Ver [docs/CONFIGURATION.md](docs/CONFIGURATION.md) para detalles completos.
 
-#### SCD30 (I2C)
-```json
-{"type": "scd30", "enabled": true, "config": {}}
+### Transmisión de Datos
+
+**InfluxDB (cada 10s):**
+```
+POST {URL from constants_private.h}
+Authorization: Basic {TOKEN_GRAFANA}
+Content-Type: text/plain
+
+medicionesCO2,device=moni-AABBCCDDEE temp=25.3,hum=60.5,co2=450 1700000000000000000
 ```
 
-#### Capacitive Soil Moisture
-```json
-{
-  "type": "capacitive",
-  "enabled": true,
-  "config": {"pin": 34}
-}
+**RS485 (cada 10s, si habilitado):**
+```
+SCD30 - Temp: 25.3°C Humedad: 60.5% CO2: 450ppm\r\n
 ```
 
-#### BME280 (I2C)
-```json
-{"type": "bme280", "enabled": true, "config": {}}
-```
+**ESP-NOW (configurable, default 30s):**
+- Sensores remotos transmiten a gateway vía ESP-NOW
+- Gateway reenvía a Grafana via HTTP
+- Ver [docs/ESPNOW.md](docs/ESPNOW.md) para arquitectura
 
-#### OneWire (DS18B20 chain)
-```json
-{
-  "type": "onewire",
-  "enabled": true,
-  "config": {
-    "pin": 4,
-    "scan": true
-  }
-}
-```
+## ESP-NOW Mesh
 
-When `scan: true`, automatically detects all DS18B20 sensors on the bus and creates individual sensor instances with unique IDs.
+Sistema de mesh para sensores sin conectividad WiFi a internet.
 
-## Hardware Setup
+**Roles:**
+- **Gateway:** Conectado a WiFi, recibe datos de sensores, envía a Grafana
+- **Sensor:** Sin WiFi, transmite a gateway vía ESP-NOW
 
-### SCD30 Wiring
-```
-ESP32        SCD30
-D22    <->   SCL
-D21    <->   SDA
-3V3    <->   Vin
-GND    <->   GND
-```
+**Auto-detección de rol:**
+1. Si WiFi conectado → test Grafana ping
+2. Grafana accesible → modo gateway
+3. Sin Grafana → modo sensor
 
-### Capacitive Soil Sensor
-```
-ESP32        Sensor
-GPIO34 <->   AOUT
-3V3    <->   VCC
-GND    <->   GND
-```
+**Limitaciones:**
+- Alcance: ~100m línea de vista, ~30m interior
+- Max peers por gateway: 20
+- Buffer de 10 mensajes en gateway
+- Sensores y gateway deben estar en mismo canal WiFi
 
-### BME280 Wiring
-```
-ESP32        BME280
-D22    <->   SCL
-D21    <->   SDA
-3V3    <->   VCC
-GND    <->   GND
-```
+Ver [docs/ESPNOW.md](docs/ESPNOW.md) para detalles del protocolo.
 
-### DS18B20 OneWire Chain
-```
-ESP32        DS18B20(s)
-GPIO4  <->   DQ (data)
-3V3    <->   VDD
-GND    <->   GND
+## Limitaciones Conocidas
 
-Note: Requires 4.7kΩ pull-up resistor between DQ and VDD
-Multiple sensors share same bus (parallel wiring)
-```
+### Hardware
+- I2C: Max 2 sensores por bus (SDA/SCL compartidos)
+- OneWire: Max ~10 sensores DS18B20 en cadena (limitado por RAM)
+- Capacitive: Solo 1 sensor (pin ADC específico)
 
-### RS485 Connection
+### Software
+- Sin buffering de datos (pérdida si sin conexión)
+- Llamadas HTTP bloqueantes (main loop pausado durante envío)
+- ESP-NOW channel debe coincidir entre gateway y sensores
+- OTA sin rollback automático
+- Config sin versionado (migraciones best-effort)
 
-**Puenteado Mode (TX-only, recommended for simple setups):**
-```
-ESP32        MAX485/Similar
-GPIO17 <->   DI (data in)
-GPIO16       (not connected)
-3V3    <->   VCC
-GND    <->   GND
-
-On RS485 module:
-- Bridge DE and RE pins together to VCC (always transmit)
-- A/B terminals to RS485 bus
-```
-
-**Full Control Mode (with DE/RE pins):**
-```
-ESP32        MAX485
-GPIO17 <->   DI
-GPIO16 <->   RO
-GPIO18 <->   DE
-GPIO19 <->   RE
-3V3    <->   VCC
-GND    <->   GND
-```
-
-Configure in `config.json`:
-```json
-{
-  "rs485_rx": 16,
-  "rs485_tx": 17,
-  "rs485_baud": 9600
-}
-```
-
-## Data Flow
-
-```
-Sensors → SensorManager.readAll()
-           ↓
-    ┌──────┴──────┐
-    ↓             ↓
-Grafana        RS485
-(InfluxDB)     (Serial)
-```
-
-Each sensor reading is sent to **both** outputs with sensor-specific tags/identifiers.
-
-### Grafana Format (InfluxDB Line Protocol)
-```
-sensor,host=<hash>,type=<sensor_id> temperature=<t>,humidity=<h>,co2=<c>
-```
-
-### RS485 Format
-```
-<SensorType> - Temp: <t>°C Humedad: <h>% CO2: <c>ppm\r\n
-```
-
-## Web Configuration Interface
-
-Access the configuration interface at `http://<ESP32_IP>/settings`
-
-**Features:**
-- View and modify all configuration parameters without recompilation
-- Enable/disable individual sensors
-- Configure RS485 settings (pins, baudrate)
-- Update WiFi credentials
-- Adjust temperature and humidity thresholds
-- Restart device remotely
-
-**Usage:**
-1. Connect to ESP32 WiFi network or ensure device is on local network
-2. Navigate to `http://<device_ip>/settings`
-3. Modify desired parameters
-4. Click "Guardar Configuración"
-5. Restart device if prompted for changes to take effect
-
-**API Endpoints:**
-- `GET /settings` - Configuration form UI
-- `GET /config` - Current configuration (JSON)
-- `POST /config` - Update configuration (JSON body)
-- `POST /restart` - Restart ESP32
-- `GET /data` - Sensor readings (HTML table)
-- `GET /actual` - Sensor readings (JSON)
-- `GET /calibrate-scd30` - Calibrate SCD30 to 400ppm
+### Performance
+- Intervalo lectura: 10s (hardcoded)
+- RAM usada: ~49KB (15%)
+- Flash: ~1.1MB (85%)
 
 ## Troubleshooting
 
-### RS485 No Output
+### Sensor no detectado
+```
+# Ver logs seriales (115200 baud)
+pio device monitor
 
-1. **Check build environment**
-   ```bash
-   # Must use rs485 or multi environment
-   pio run -e esp32dev_multi --target upload
-   ```
+# Buscar:
+"No se pudo inicializar el sensor {TIPO}!"
+```
+→ Verificar wiring, voltaje 3.3V, pull-ups si aplica
 
-2. **Verify config.json**
-   ```json
-   {"rs485_enabled": true}
-   ```
+### Sin datos en Grafana
+1. Check IP y conectividad: ping ESP32
+2. Test endpoint: `curl http://{IP}/actual`
+3. Verificar URL en `constants_private.h`
+4. Ver logs serial para errores HTTP
 
-3. **Monitor serial output** for initialization:
-   ```
-   RS485 inicializado sin control DE/RE (puenteado)
-   RS485: RX=16, TX=17, Baud=9600
-   ```
+### ESP-NOW no parece
+1. Verificar mismo canal WiFi (config.json)
+2. Gateway debe estar en modo gateway (ver `/espnow/status`)
+3. Sensor debe detectar beacons (ver logs)
+4. Alcance: mover dispositivos más cerca
 
-4. **Check wiring**
-   - TX pin (GPIO17) connected to RS485 DI
-   - DE/RE bridged to VCC for puenteado mode
-   - Correct baud rate on receiving device
+### WiFi no conecta
+- Borrar credenciales: POST a `/config/reset`
+- Reconectar a AP del ESP32
+- Re-configurar WiFi en `/settings`
 
-5. **Verify data transmission** on Serial Monitor:
-   ```
-   [RS485 TX] Capacitive - Humedad: 65.2%
-   ```
+## Desarrollo
 
-### OneWire Sensors Not Detected
+### Agregar sensor nuevo
 
-1. **Check pull-up resistor** (4.7kΩ between DQ and VDD)
-2. **Verify sensor power** (3.3V to VDD, not 5V)
-3. **Enable scanning** in config.json: `"scan": true`
-4. **Monitor serial output**:
-   ```
-   OneWire: 3 sensors detected on pin 4
-   ```
+1. Crear `include/sensors/MySensor.h` implementando `ISensor`
+2. Agregar a `SensorManager::loadFromConfig()` switch
+3. Update `platformio.ini` con dependencias
+4. Documentar en [docs/SENSORS.md](docs/SENSORS.md)
 
-### I2C Sensors Not Found
-
-1. **Check wiring** (SDA/SCL, VCC/GND)
-2. **Verify I2C address** with scanner sketch
-3. **Check power supply** (stable 3.3V)
-4. **Monitor serial output**:
-   ```
-   No se pudo inicializar el sensor SCD30!
-   ```
-
-## Memory Usage
-
-Typical for `esp32dev_multi` with all sensors:
-- **RAM**: ~49KB (15%)
-- **Flash**: ~1.1MB (85%)
-
-## Development
-
-### Adding New Sensor Type
-
-1. Create header in `include/sensors/` implementing `ISensor` interface
-2. Add to `SensorManager::loadFromConfig()` switch statement
-3. Update `platformio.ini` lib_deps if needed
-4. Add config.json example to README
-
-### Testing
+### Testing local
 
 ```bash
-# Build and upload
+# Build
+pio run -e esp32dev_multi
+
+# Upload
 pio run -e esp32dev_multi --target upload
 
-# Monitor output
-pio device monitor -e esp32dev_multi
+# Monitor serial
+pio device monitor -b 115200
 
-# Check RS485 output (Linux)
-screen /dev/ttyUSB1 9600
+# Test RS485 output (Linux)
+screen /dev/ttyUSB0 9600
 ```
 
-## License
+## Documentación Adicional
 
-Same as upstream AlterMundi-MonitoreoyControl/proyecto-monitoreo
+- [API Reference](docs/API.md) - Endpoints HTTP detallados
+- [ESP-NOW Protocol](docs/ESPNOW.md) - Mesh networking
+- [Configuration](docs/CONFIGURATION.md) - config.json completo
+- [Sensors](docs/SENSORS.md) - Detalles de cada sensor
+- [Data Flow](docs/DATA_FLOW.md) - Flujo desde sensor a Grafana
+
+## Licencia
+
+Same as upstream [AlterMundi-MonitoreoyControl/proyecto-monitoreo](https://github.com/AlterMundi-MonitoreoyControl/proyecto-monitoreo)

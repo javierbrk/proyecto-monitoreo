@@ -12,6 +12,8 @@
 #include "sensors/SensorBME280.h"
 #include "sensors/SensorSimulated.h"
 #include "sensors/SensorOneWire.h"
+#include "sensors/ModbusTHSensor.h"
+#include "sensors/HD38Sensor.h"
 
 class SensorManager {
 private:
@@ -83,6 +85,40 @@ public:
                 if (scan) {
                     int count = scanOneWire(pin);
                     Serial.printf("OneWire: %d sensors detected on pin %d\n", count, pin);
+                }
+
+            } else if (strcmp(type, "modbus_th") == 0) {
+                // Modbus RTU Temperature/Humidity sensor (TH-MB-04S)
+                uint8_t addr = cfg["address"] | 1;
+                int rx = cfg["rx_pin"] | 16;
+                int tx = cfg["tx_pin"] | 17;
+                int de = cfg["de_pin"] | -1;
+                uint32_t baud = cfg["baudrate"] | 9600;
+
+                ISensor* s = new ModbusTHSensor(addr, rx, tx, de, baud);
+                if (s->init()) {
+                    sensors.push_back(s);
+                    Serial.printf("ModbusTH sensor (addr=%d) added\n", addr);
+                } else {
+                    delete s;
+                    Serial.printf("ModbusTH sensor (addr=%d) init failed\n", addr);
+                }
+
+            } else if (strcmp(type, "hd38") == 0) {
+                // HD-38 Soil Moisture sensor
+                int aPin = cfg["analog_pin"] | 35;
+                int dPin = cfg["digital_pin"] | -1;
+                bool divider = cfg["voltage_divider"] | true;
+                bool invert = cfg["invert_logic"] | false;
+                const char* name = cfg["name"] | "HD38";
+
+                ISensor* s = new HD38Sensor(aPin, dPin, divider, invert, name);
+                if (s->init()) {
+                    sensors.push_back(s);
+                    Serial.printf("HD38 sensor '%s' on pin %d added\n", name, aPin);
+                } else {
+                    delete s;
+                    Serial.println("HD38 sensor init failed");
                 }
             }
         }
