@@ -155,6 +155,18 @@ public:
         return typeName;
     }
 
+    const char* getSensorID() override {
+        static char sensorId[32];
+        snprintf(sensorId, sizeof(sensorId), "h-adc-%d", analogPin);
+        return sensorId;
+    }
+
+    const char* getMeasurementsString() override {
+        static char measString[64];
+        snprintf(measString, sizeof(measString), "hum=%.1f", humidity);
+        return measString;
+    }
+
     bool isActive() override {
         return active;
     }

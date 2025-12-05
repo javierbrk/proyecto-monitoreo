@@ -39,6 +39,12 @@ public:
     float getHumidity() override { return humidity; }
     float getCO2() override { return co2; }
     const char* getSensorType() override { return "Simulated"; }
+    const char* getSensorID() override { return "sim-001"; }
+    const char* getMeasurementsString() override {
+        static char measString[64];
+        snprintf(measString, sizeof(measString), "temp=%.2f,hum=%.2f,co2=%.2f", temperature, humidity, co2);
+        return measString;
+    }
     bool isActive() override { return active; }
 };
 

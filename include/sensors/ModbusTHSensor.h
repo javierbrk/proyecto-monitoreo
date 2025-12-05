@@ -167,6 +167,19 @@ public:
         snprintf(sensorName, sizeof(sensorName), "modbus_th_%d", modbusAddress);
         return sensorName;
     }
+    // Identifier format: "th-mod-address"
+    const char* getSensorID() override {
+        static char sensorID[32];
+        snprintf(sensorID, sizeof(sensorID), "th-mod-%d", modbusAddress);
+        return sensorID;
+    }
+
+    const char* getMeasurementsString() override {
+        static char measString[32];
+        //" temp=" + String(temperature, 2) + ",hum=" + String(humidity, 2) +  ",co2=" + String(co2) +
+        snprintf(measString, sizeof(measString), "temp=%.1f,hum=%.1f", temperature, humidity);
+        return measString;
+    }
 
     bool calibrate(float reference) override {
         return false;
