@@ -203,7 +203,7 @@ public:
     // Get sensor identifier for logging
     String getSensorId(ISensor* sensor) const {
         if (strcmp(sensor->getSensorType(), "OneWire") == 0) {
-            return ((SensorOneWire*)sensor)->getSensorId();
+            return ((SensorOneWire*)sensor)->getSensorID();
         } else if (strcmp(sensor->getSensorType(), "Capacitive") == 0) {
             return String(sensor->getSensorType()) + "_default";
         }

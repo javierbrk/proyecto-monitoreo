@@ -13,7 +13,6 @@ private:
     float temperature;
     int deviceIndex;
     bool active;
-
 public:
     SensorOneWire(DallasTemperature* dt, DeviceAddress addr, int idx)
         : dallas(dt), deviceIndex(idx), temperature(-127), active(false) {
@@ -27,6 +26,7 @@ public:
         }
         addressStr.toUpperCase();
     }
+    
 
     bool init() override {
         if (dallas) {
@@ -65,10 +65,17 @@ public:
     bool isActive() override { return active; }
 
     // OneWire-specific methods
-    String getAddress() const { return addressStr; }
-
-    String getSensorId() const {
-        return "OneWire_" + addressStr.substring(0, 12);  // First 12 chars for brevity
+    const char* getSensorID() override {
+        static char sensorId[32];
+        size_t len = addressStr.length();
+        String last4 = (len > 4) ? addressStr.substring(len - 4) : addressStr;
+        snprintf(sensorId, sizeof(sensorId), "t-1w-%s", last4.c_str());
+        return sensorId;
+    }
+    const char* getMeasurementsString() override {
+        static char measString[32];
+        snprintf(measString, sizeof(measString), "temp=%.2f", temperature);
+        return measString;  
     }
 };
 

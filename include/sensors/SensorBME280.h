@@ -10,14 +10,16 @@ private:
     bool active;
     float temperature;
     float humidity;
-    float pressure;  // hPa (not exposed via interface, but stored)
+    float pressure; 
+    //address could be 0x76 or 0x77
+    u_int address = 0x76;
 
 public:
     SensorBME280() : active(false), temperature(99), humidity(100), pressure(0) {}
 
     bool init() override {
         // Try I2C address 0x76 (default) or 0x77 (alternate)
-        active = bme.begin(0x76) || bme.begin(0x77);
+        active = bme.begin(0x76) || bme.begin(0x77) && ((address = 0x77) || true);
 
         if (!active) {
             Serial.println("No se pudo inicializar el sensor BME280!");
@@ -58,11 +60,23 @@ public:
     float getTemperature() override { return temperature; }
     float getHumidity() override { return humidity; }
     float getCO2() override { return -1; }  // Not available
+    float getPressure() override { return pressure; }
+    const char* getMeasurementsString() override {
+        static char measString[64];
+        snprintf(measString, sizeof(measString), "temp=%.2f,hum=%.2f,press=%.2f", temperature, humidity, pressure);
+        return measString;
+    }
     const char* getSensorType() override { return "BME280"; }
+    const char* getSensorID() override {
+        static char idString[16];
+        snprintf(idString, sizeof(idString), "thp-i2c-%u", (unsigned)address);
+        return idString;
+    }
     bool isActive() override { return active; }
 
     // BME280-specific method (not in interface)
-    float getPressure() { return pressure; }
+    // Duplicate getPressure() removed (use the override method above)
+
 };
 
 #endif // SENSOR_BME280_H

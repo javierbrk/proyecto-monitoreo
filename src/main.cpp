@@ -389,7 +389,8 @@ void loop() {
                        sensorId.c_str(), temperature, humidity, co2);
 
           // Enviar a Grafana
-          sendDataGrafana(temperature, humidity, co2, sensorId.c_str());
+          //sendDataGrafana(temperature, humidity, co2, sensorId.c_str());
+          sendDataGrafana(s->getMeasurementsString(), s->getSensorID());
 
           #ifdef ENABLE_RS485
             // Enviar por RS485

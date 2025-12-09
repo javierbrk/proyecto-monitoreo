@@ -1,6 +1,6 @@
 #ifndef SENSOR_SCD30_H
 #define SENSOR_SCD30_H
-
+//TODO: este pude ser serial ... no solo i2c ... lo venimos usando por serial
 #include "ISensor.h"
 #include <Adafruit_SCD30.h>
 
@@ -46,6 +46,18 @@ public:
     float getCO2() override { return co2; }
     const char* getSensorType() override { return "SCD30"; }
 
+    const char* getSensorID() override {
+        static char sensorId[16];
+        snprintf(sensorId, sizeof(sensorId), "i2c-0x%02X", SCD30_I2CADDR_DEFAULT);
+        return sensorId;
+    }
+
+    const char* getMeasurementsString() override {
+        static char measString[64];
+        snprintf(measString, sizeof(measString), "temp=%.2f,hum=%.2f,co2=%.2f", temperature, humidity, co2);
+        return measString;
+    }
+    
     bool calibrate(float reference = 400) override {
         if (!active) return false;
         return scd30.forceRecalibrationWithReference((uint16_t)reference);
