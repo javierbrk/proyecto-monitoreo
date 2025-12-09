@@ -42,6 +42,7 @@ unsigned long lastSendTime = 0;
 // Mesh data buffer structure to avoid HTTP calls from WiFi interrupt context
 struct MeshDataBuffer {
   uint8_t senderMAC[6];
+  char sensorId[32] ;
   float temp;
   float hum;
   float co2;
@@ -58,9 +59,10 @@ volatile int meshBufferTail = 0;
 #ifndef UNIT_TEST
 
 #ifdef ENABLE_ESPNOW
+
 // Callback to enqueue mesh data (gateway only)
 // IMPORTANT: Runs in WiFi interrupt context - must not call HTTP/blocking functions
-void onMeshDataReceived(const uint8_t* senderMAC, float temp, float hum, float co2, uint32_t seq) {
+void onMeshDataReceived(const uint8_t* senderMAC, float temp, float hum, float co2, uint32_t seq, const char* sensorId) {
   // Calculate next buffer position
   int nextHead = (meshBufferHead + 1) % MESH_BUFFER_SIZE;
 
@@ -72,6 +74,13 @@ void onMeshDataReceived(const uint8_t* senderMAC, float temp, float hum, float c
 
   // Store data in buffer
   memcpy(meshBuffer[meshBufferHead].senderMAC, senderMAC, 6);
+
+  if (sensorId != nullptr) {
+    strncpy(meshBuffer[meshBufferHead].sensorId, sensorId, sizeof(meshBuffer[meshBufferHead].sensorId) - 1);
+    meshBuffer[meshBufferHead].sensorId[sizeof(meshBuffer[meshBufferHead].sensorId) - 1] = '\0';
+  } else {
+    strcpy(meshBuffer[meshBufferHead].sensorId, "unknown");
+  }  
   meshBuffer[meshBufferHead].temp = temp;
   meshBuffer[meshBufferHead].hum = hum;
   meshBuffer[meshBufferHead].co2 = co2;
@@ -339,15 +348,15 @@ void loop() {
       MeshDataBuffer* data = &meshBuffer[meshBufferTail];
 
       if (data->valid) {
-        char sensorId[32];
-        snprintf(sensorId, sizeof(sensorId), "mesh_%02X%02X%02X",
+        char deviceid[32];
+        snprintf(deviceid, sizeof(deviceid), "moni_%02X%02X%02X",
                  data->senderMAC[3], data->senderMAC[4], data->senderMAC[5]);
 
         Serial.printf("[MESH→GRAFANA] %s: T=%.1f H=%.1f CO2=%.0f (seq=%lu)\n",
-                      sensorId, data->temp, data->hum, data->co2, data->seq);
+          deviceid, data->temp, data->hum, data->co2, data->seq);
 
         // Now safe to make HTTP call from main loop
-        sendDataGrafana(data->temp, data->hum, data->co2, sensorId);
+        sendDataGrafana(data->temp, data->hum, data->co2, data->sensorId, deviceid);
 
         data->valid = false;  // Mark as processed
       }

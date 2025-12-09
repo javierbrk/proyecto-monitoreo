@@ -27,11 +27,12 @@ typedef struct {
 // Sensor data message structure
 typedef struct {
   uint8_t msgType;       // MessageType enum (MSG_DATA)
-  uint8_t sensorId;      // Sensor identifier
-  float temperature;     // Temperature reading
-  float humidity;        // Humidity reading
+  char sensorId[32];      // Sensor identifier
+  float temperature;     // Temperature reading(-1 if not available)
+  float humidity;        // Humidity reading (-1 if not available)
   float co2;            // CO2 reading (-1 if not available)
   uint32_t sequence;     // Sequence number for duplicate detection
+  
 } SensorDataMessage;
 
 // Peer information structure
@@ -79,7 +80,7 @@ private:
   static ESPNowManager* instance;
 
   // Callback for received mesh data (gateway only)
-  typedef void (*MeshDataCallback)(const uint8_t* senderMAC, float temp, float hum, float co2, uint32_t seq);
+  typedef void (*MeshDataCallback)(const uint8_t* senderMAC, float temp, float hum, float co2, uint32_t seq, const char* sensorId);
   MeshDataCallback meshDataCallback;
 
   // Cleanup stale peers (gateway only)
@@ -298,12 +299,12 @@ private:
     }
 
     // Log received data
-    Serial.printf("[ESP-NOW] Data from sensor %d: T=%.1f H=%.1f CO2=%.0f (seq=%lu)\n",
+    Serial.printf("[ESP-NOW] Data from sensor %s: T=%.1f H=%.1f CO2=%.0f (seq=%lu)\n",
                   msg->sensorId, msg->temperature, msg->humidity, msg->co2, msg->sequence);
 
     // Forward to registered callback (e.g., Grafana)
     if (meshDataCallback != nullptr) {
-      meshDataCallback(mac_addr, msg->temperature, msg->humidity, msg->co2, msg->sequence);
+      meshDataCallback(mac_addr, msg->temperature, msg->humidity, msg->co2, msg->sequence, msg->sensorId);
     }
   }
 
@@ -466,8 +467,8 @@ public:
 
     SensorDataMessage msg;
     msg.msgType = MSG_DATA;
-    msg.sensorId = ESP.getEfuseMac() & 0xFF;
-    msg.temperature = temperature;
+    strncpy(msg.sensorId, sensorId, sizeof(msg.sensorId) - 1);
+    msg.sensorId[sizeof(msg.sensorId) - 1] = '\0'; // Asegurar null-termination    msg.temperature = temperature;
     msg.humidity = humidity;
     msg.co2 = co2;
     msg.sequence = sequenceNumber++;
