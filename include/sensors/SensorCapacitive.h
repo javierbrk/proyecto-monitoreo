@@ -65,6 +65,18 @@ public:
         return "Capacitive";
     }
 
+    const char* getSensorID() override {
+        static char idString[16];
+        snprintf(idString, sizeof(idString), "h-adc-%d", pin);
+        return idString;
+    }
+
+    const char* getMeasurementsString() override {
+        static char measString[32];
+        snprintf(measString, sizeof(measString), "soilHum=%.2f", humidity);
+        return measString;
+    }
+
     bool isActive() override {
         return active;
     }

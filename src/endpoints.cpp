@@ -4,9 +4,16 @@
 #include <SPIFFS.h>
 #include "endpoints.h"
 #include "globals.h"
+#include "constants.h"
 #include "configFile.h"
+#include "webConfigPage.h"
 
 #include <ArduinoJson.h>
+
+#ifdef ENABLE_ESPNOW
+  #include "ESPNowManager.h"
+  extern ESPNowManager espnowMgr;
+#endif
 
 void handleMediciones() {
     float temperature = 99, humidity = 100, co2 = 999999, presion = 99;
@@ -78,46 +85,60 @@ void handleData() {
 }
 
 void handleConfiguracion() {
-    String jsonfile = getConfigFile();
-    if (jsonfile.isEmpty()) {
-    server.send(500, "application/json", "{\"error\": \"No se pudo abrir config.json\"}");
+    JsonDocument doc = loadConfig();
+
+    if (doc.isNull() || doc.size() == 0) {
+        server.send(500, "application/json", "{\"error\": \"No se pudo cargar config.json\"}");
+        return;
     }
-    else
-    {
-    server.send(200, "application/json", jsonfile);
+
+    // Add dynamic data not stored in the file
+    if (WiFi.status() == WL_CONNECTED) {
+        doc["current_wifi_channel"] = WiFi.channel();
+    } else {
+        doc["current_wifi_channel"] = 0; // 0 indicates not connected or channel not available
     }
+
+    String output;
+    serializeJson(doc, output);
+    server.send(200, "application/json", output);
 }
 
 void habldePostConfig() {
-    Serial.println("set config ... ");
-    
-    if (server.hasArg("plain")) {
-      String jsonString = server.arg("plain");
-      JsonDocument doc;
-      DeserializationError error = deserializeJson(doc, jsonString);
+    Serial.println("Updating configuration...");
 
-      if (error) {
-        Serial.print("deserializeJson() failed: ");
-        Serial.println(error.c_str());
-        server.send(400, "text/plain", "Invalid JSON format");
-        return;
-      }
-
-      // Extract SSID and password from JSON
-      const char* new_ssid = doc["ssid"];
-      const char* new_password = doc["passwd"];
-
-      if (new_ssid && strlen(new_ssid) > 0 && strcmp(new_ssid, "ToChange") != 0) {
-        wifiManager.onChange(String(new_ssid), String(new_password));
-        Serial.printf("New SSID: %s\n, new password %s \n", new_ssid, new_password);
-        server.send(200, "text/plain", "Configuration updated. Attempting to connect to " + String(new_ssid));
-      } else {
-        Serial.printf("SSID is empty in received JSON\n");
-        server.send(400, "text/plain", "SSID cannot be empty");
-      }
-    } else {
-      Serial.println("no json");
+    if (!server.hasArg("plain")) {
       server.send(400, "text/plain", "No JSON data received");
+      return;
+    }
+
+    String jsonString = server.arg("plain");
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, jsonString);
+
+    if (error) {
+      Serial.print("deserializeJson() failed: ");
+      Serial.println(error.c_str());
+      server.send(400, "text/plain", "Invalid JSON format");
+      return;
+    }
+
+    // Update WiFi if SSID changed
+    const char* new_ssid = doc["ssid"];
+    const char* new_password = doc["passwd"];
+
+    if (new_ssid && strlen(new_ssid) > 0 && strcmp(new_ssid, "ToChange") != 0) {
+      wifiManager.onChange(String(new_ssid), String(new_password));
+      Serial.printf("WiFi updated: %s\n", new_ssid);
+    }
+
+    // Save complete config to SPIFFS
+    if (updateConfig(doc)) {
+      server.send(200, "text/plain", "Configuration updated successfully. Some changes require restart.");
+      Serial.println("Configuration saved to SPIFFS");
+    } else {
+      server.send(500, "text/plain", "Failed to save configuration");
+      Serial.println("Failed to save configuration");
     }
   }
 
@@ -163,3 +184,71 @@ void handleSCD30Calibration() {
   server.send(httpStatus, "application/json", response);
   Serial.println("Calibration response sent: " + response);
 }
+
+void handleSettings() {
+  server.send(200, "text/html", getConfigPageHTML());
+}
+
+void handleRestart() {
+  server.send(200, "text/plain", "Restarting ESP32...");
+  delay(1000);
+  ESP.restart();
+}
+
+void handleConfigReset() {
+  Serial.println("[→ INFO] Reseteando configuración completa...");
+
+  // Remove existing config file
+  if (SPIFFS.exists(CONFIG_FILE_PATH)) {
+    if (SPIFFS.remove(CONFIG_FILE_PATH)) {
+      Serial.println("[✓ OK  ] Config.json eliminado");
+    } else {
+      Serial.println("[✗ ERR ] Error al eliminar config.json");
+    }
+  }
+
+  // Create new default config
+  createConfigFile();
+
+  // Send response
+  JsonDocument doc;
+  doc["success"] = true;
+  doc["message"] = "Configuration reset to defaults. Restarting...";
+
+  String output;
+  serializeJson(doc, output);
+  server.send(200, "application/json", output);
+
+  Serial.println("[→ INFO] Reiniciando ESP32 con configuración por defecto...");
+  delay(1000);
+  ESP.restart();
+}
+
+#ifdef ENABLE_ESPNOW
+void handleESPNowStatus() {
+  JsonDocument doc;
+
+  JsonDocument config = loadConfig();
+  bool espnowEnabled = config["espnow_enabled"] | false;
+  String forcedMode = config["espnow_force_mode"] | "";
+  String actualMode = espnowMgr.getMode();  // Get actual running mode
+
+  doc["enabled"] = espnowEnabled;
+  doc["mode"] = actualMode;  // Show actual mode (after auto-detection)
+  doc["forced_mode"] = forcedMode;  // Show configured forced mode
+  doc["mac_address"] = espnowMgr.getMACAddress();
+  doc["channel"] = (WiFi.status() == WL_CONNECTED) ? WiFi.channel() : 0;
+
+  if (actualMode == "sensor") {
+    doc["paired"] = espnowMgr.isPaired();
+    doc["peer_count"] = 0;  // Sensors don't track peers
+  } else {
+    doc["paired"] = true;  // Gateway is always "paired"
+    doc["peer_count"] = espnowMgr.getActivePeerCount();
+  }
+
+  String output;
+  serializeJson(doc, output);
+  server.send(200, "application/json", output);
+}
+#endif

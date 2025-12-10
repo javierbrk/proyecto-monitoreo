@@ -10,10 +10,12 @@
   #include "SensorCapacitive.h"
 #elif defined(SENSOR_TYPE_BME280)
   #include "SensorBME280.h"
+#elif defined(SENSOR_TYPE_MODBUS_TH)
+  #include "ModbusTHSensor.h"
 #elif defined(MODO_SIMULACION)
   #include "SensorSimulated.h"
 #else
-  #error "No sensor type defined! Use -DSENSOR_TYPE_SCD30, -DSENSOR_TYPE_CAPACITIVE, -DSENSOR_TYPE_BME280, or -DMODO_SIMULACION"
+  #error "No sensor type defined! Use -DSENSOR_TYPE_SCD30, -DSENSOR_TYPE_CAPACITIVE, -DSENSOR_TYPE_BME280, -DSENSOR_TYPE_MODBUS_TH, or -DMODO_SIMULACION"
 #endif
 
 class SensorFactory {
@@ -25,6 +27,8 @@ public:
             return new SensorCapacitive();
         #elif defined(SENSOR_TYPE_BME280)
             return new SensorBME280();
+        #elif defined(SENSOR_TYPE_MODBUS_TH)
+            return new ModbusTHSensor();
         #elif defined(MODO_SIMULACION)
             return new SensorSimulated();
         #else
