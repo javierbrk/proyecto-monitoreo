@@ -201,6 +201,11 @@ const char* getConfigPageHTML() {
                     <input type="text" id="passwd" name="passwd">
                     <div class="info-text">Dejar vacío para mantener contraseña actual</div>
                 </div>
+                <div class="form-group">
+                    <label>Canal WiFi Actual</label>
+                    <div id="wifi_channel_status" style="padding: 10px; background: #f0f0f0; border-radius: 6px; color: var(--gray-dark); font-weight: 500;">-</div>
+                    <div class="info-text">El canal en el que opera la red WiFi actual.</div>
+                </div>
             </div>
 
             <!-- Sistema Section -->
@@ -305,6 +310,7 @@ const char* getConfigPageHTML() {
                     <div id="espnow_status" style="margin-top: 15px; padding: 10px; background: #f9f9f9; border-radius: 4px;">
                         <strong>Estado:</strong> <span id="espnow_status_text">Cargando...</span><br>
                         <strong>Modo Actual:</strong> <span id="espnow_current_mode">-</span><br>
+                        <strong>Canal WiFi Actual:</strong> <span id="espnow_channel_status">-</span><br>
                         <strong>MAC Address:</strong> <span id="espnow_mac">-</span><br>
                         <span id="espnow_paired_status"></span>
                         <span id="espnow_peer_count"></span>
@@ -367,6 +373,10 @@ const char* getConfigPageHTML() {
             document.getElementById('ssid').value = config.ssid || '';
             document.getElementById('passwd').value = ''; // Never show password
 
+            // WiFi Channel
+            const channel = config.current_wifi_channel;
+            document.getElementById('wifi_channel_status').textContent = channel > 0 ? channel : 'No conectado';
+
             // Sistema
             document.getElementById('incubator_name').value = config.incubator_name || config.moni_name || '';
             document.getElementById('min_temperature').value = config.min_temperature || '';
@@ -425,6 +435,8 @@ const char* getConfigPageHTML() {
                 document.getElementById('espnow_status_text').textContent = status.enabled ? 'Habilitado' : 'Deshabilitado';
                 document.getElementById('espnow_current_mode').textContent = status.mode || '-';
                 document.getElementById('espnow_mac').textContent = status.mac_address || '-';
+                const channel = status.channel;
+                document.getElementById('espnow_channel_status').textContent = channel > 0 ? channel : 'No disponible (sin WiFi)';
 
                 if (status.mode === 'sensor') {
                     document.getElementById('espnow_paired_status').innerHTML =

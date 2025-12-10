@@ -1,5 +1,7 @@
 # ESP-NOW Mesh Protocol
 
+Todos los nodos deben configurarse en el canal del gateway 
+
 Arquitectura de red mesh para sensores sin conexión WiFi a internet.
 
 ## Arquitectura

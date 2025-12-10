@@ -65,13 +65,14 @@ volatile int meshBufferTail = 0;
 void onMeshDataReceived(const uint8_t* senderMAC, float temp, float hum, float co2, uint32_t seq, const char* sensorId) {
   // Calculate next buffer position
   int nextHead = (meshBufferHead + 1) % MESH_BUFFER_SIZE;
+  Serial.println(".");
 
   // Check if buffer is full
   if (nextHead == meshBufferTail) {
     Serial.println("[MESH] ✗ Buffer full, dropping data");
     return;
   }
-
+ Serial.println(".");
   // Store data in buffer
   memcpy(meshBuffer[meshBufferHead].senderMAC, senderMAC, 6);
 
@@ -86,12 +87,12 @@ void onMeshDataReceived(const uint8_t* senderMAC, float temp, float hum, float c
   meshBuffer[meshBufferHead].co2 = co2;
   meshBuffer[meshBufferHead].seq = seq;
   meshBuffer[meshBufferHead].valid = true;
-
+ Serial.println(".");
   // Update head pointer (atomic for single-writer scenario)
   meshBufferHead = nextHead;
-
-  Serial.printf("[ESP-NOW] Data buffered from sensor %d (seq=%lu)\n",
-                senderMAC[5], seq);
+ Serial.println(".");
+  //Serial.printf("[ESP-NOW] Data buffered from sensor %d (seq=%lu)\n",
+               // senderMAC[5], seq);
 }
 
 String detectRole() {
@@ -346,14 +347,15 @@ void loop() {
     // This runs in main loop context, safe for HTTP calls
     while (meshBufferTail != meshBufferHead) {
       MeshDataBuffer* data = &meshBuffer[meshBufferTail];
-
+      Serial.printf("[MESH→GRAFANA] Processing buffered data from %02X:%02X:%02X:%02X:%02X:%02X (seq=%lu)\n",
+                 data->senderMAC[0], data->senderMAC[1], data->senderMAC[2], data->senderMAC[3], data->senderMAC[4], data->senderMAC[5], data->seq);
       if (data->valid) {
         char deviceid[32];
-        snprintf(deviceid, sizeof(deviceid), "moni_%02X%02X%02X",
-                 data->senderMAC[3], data->senderMAC[4], data->senderMAC[5]);
+        snprintf(deviceid, sizeof(deviceid), "moni-%02X%02X%02X%02X%02X%02X",
+                 data->senderMAC[0], data->senderMAC[1], data->senderMAC[2], data->senderMAC[3], data->senderMAC[4], data->senderMAC[5]);
 
         Serial.printf("[MESH→GRAFANA] %s: T=%.1f H=%.1f CO2=%.0f (seq=%lu)\n",
-          deviceid, data->temp, data->hum, data->co2, data->seq);
+                      deviceid, data->temp, data->hum, data->co2, data->seq);
 
         // Now safe to make HTTP call from main loop
         sendDataGrafana(data->temp, data->hum, data->co2, data->sensorId, deviceid);
@@ -395,21 +397,20 @@ void loop() {
           String sensorId = sensorMgr.getSensorId(s);
 
           Serial.printf("[%s] Temp: %.1f°C, Hum: %.1f%%, CO2: %.0fppm\n",
-                       sensorId.c_str(), temperature, humidity, co2);
+                       s->getSensorID(), temperature, humidity, co2);
 
           // Enviar a Grafana
-          //sendDataGrafana(temperature, humidity, co2, sensorId.c_str());
           sendDataGrafana(s->getMeasurementsString(), s->getSensorID());
 
           #ifdef ENABLE_RS485
             // Enviar por RS485
-            rs485.sendSensorData(temperature, humidity, co2, sensorId.c_str());
+            rs485.sendSensorData(temperature, humidity, co2, s->getSensorID());
           #endif
 
           #ifdef ENABLE_ESPNOW
             // Enviar por ESP-NOW (solo si es sensor y está emparejado)
             if (espnowMgr.getMode() == "sensor" && espnowMgr.isPaired()) {
-              espnowMgr.sendSensorData(temperature, humidity, co2, sensorId.c_str());
+              espnowMgr.sendSensorData(temperature, humidity, co2, s->getSensorID());
             }
           #endif
         }
@@ -438,7 +439,7 @@ void loop() {
       }
 
       Serial.printf("Free heap before sending: %d bytes\n", ESP.getFreeHeap());
-      sendDataGrafana(temperature, humidity, co2, sensor ? sensor->getSensorType() : "Unknown");
+      sendDataGrafana(sensor->getMeasurementsString(), sensor->getSensorID());
       Serial.printf("Free heap after sending: %d bytes\n", ESP.getFreeHeap());
 
       #ifdef ENABLE_RS485

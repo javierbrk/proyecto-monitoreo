@@ -85,14 +85,23 @@ void handleData() {
 }
 
 void handleConfiguracion() {
-    String jsonfile = getConfigFile();
-    if (jsonfile.isEmpty()) {
-    server.send(500, "application/json", "{\"error\": \"No se pudo abrir config.json\"}");
+    JsonDocument doc = loadConfig();
+
+    if (doc.isNull() || doc.size() == 0) {
+        server.send(500, "application/json", "{\"error\": \"No se pudo cargar config.json\"}");
+        return;
     }
-    else
-    {
-    server.send(200, "application/json", jsonfile);
+
+    // Add dynamic data not stored in the file
+    if (WiFi.status() == WL_CONNECTED) {
+        doc["current_wifi_channel"] = WiFi.channel();
+    } else {
+        doc["current_wifi_channel"] = 0; // 0 indicates not connected or channel not available
     }
+
+    String output;
+    serializeJson(doc, output);
+    server.send(200, "application/json", output);
 }
 
 void habldePostConfig() {
@@ -228,6 +237,7 @@ void handleESPNowStatus() {
   doc["mode"] = actualMode;  // Show actual mode (after auto-detection)
   doc["forced_mode"] = forcedMode;  // Show configured forced mode
   doc["mac_address"] = espnowMgr.getMACAddress();
+  doc["channel"] = (WiFi.status() == WL_CONNECTED) ? WiFi.channel() : 0;
 
   if (actualMode == "sensor") {
     doc["paired"] = espnowMgr.isPaired();

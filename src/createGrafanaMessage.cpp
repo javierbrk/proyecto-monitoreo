@@ -8,8 +8,9 @@
  * Otherwise, use the gateway MAC address
  */
 static void buildDeviceName(char* device_name, size_t size, const char* deviceId) {
-  if (strncmp(deviceId, "mesh_", 5) == 0) {
+  if (deviceId && strncmp(deviceId, "moni-", 5) == 0) {
     snprintf(device_name, size, "%s", deviceId);
+    
   } else {
     // For local sensors, use gateway MAC
     String mac = WiFi.macAddress();
