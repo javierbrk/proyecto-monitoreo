@@ -338,8 +338,8 @@ public:
       Serial.println("  └─ Gateway: usando config WiFi existente");
     } else {
       // Sensor mode: WiFi STA without connection
-      WiFi.mode(WIFI_STA);
-      WiFi.disconnect();
+      //WiFi.mode(WIFI_STA);
+      //WiFi.disconnect();
 
       // CRITICAL: Force WiFi channel for sensor mode
       // Without this, sensor won't receive gateway beacons on specific channel

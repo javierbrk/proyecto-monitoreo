@@ -202,7 +202,7 @@ const char* getConfigPageHTML() {
                     <div class="info-text">Dejar vacío para mantener contraseña actual</div>
                 </div>
                 <div class="form-group">
-                    <label>Canal WiFi Actual</label>
+                    <label>Canal WiFi Actual, usar para esp now en todos los dispositivos espnow !!!!!! </label>
                     <div id="wifi_channel_status" style="padding: 10px; background: #f0f0f0; border-radius: 6px; color: var(--gray-dark); font-weight: 500;">-</div>
                     <div class="info-text">El canal en el que opera la red WiFi actual.</div>
                 </div>
@@ -294,13 +294,13 @@ const char* getConfigPageHTML() {
                         <small style="color: var(--gray-medium);">URL para verificar conectividad a Grafana</small>
                     </div>
                     <div class="form-group">
-                        <label for="espnow_channel">Canal WiFi</label>
+                        <label for="espnow_channel">Canal WiFi !!!! </label>
                         <select id="espnow_channel" name="espnow_channel">
                             <option value="1">1</option>
                             <option value="6">6</option>
                             <option value="11">11</option>
                         </select>
-                        <small style="color: var(--gray-medium);">Canal usado por sensores (gateways usan canal WiFi actual)</small>
+                        <small style="color: var(--gray-medium);">Canal usado por gateways y sensores, igual al canal del WiFi del gateway</small>
                     </div>
                     <div class="form-group">
                         <label for="send_interval_ms">Intervalo de envío (ms)</label>
