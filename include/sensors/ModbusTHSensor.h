@@ -40,8 +40,8 @@ private:
     int dePin;
     uint32_t baudrate;
 
-    float temperature;
-    float humidity;
+    float temperature = 999;
+    float humidity = 99;
     bool active;
 
     // Modbus read result callbacks
@@ -146,8 +146,15 @@ public:
                          modbusAddress, temperature, humidity);
             return true;
         }
+        // On failure, set invalid values ... do not just keep the lastone 
+        humidity = 99;
+        temperature = 999;
 
+        Serial.printf("[ModbusTH] Addr %d: T=%.1f C, H=%.1f%%\n",
+                        modbusAddress, temperature, humidity);
+        Serial.printf("[ModbusTH] Addr %d: Read failed\n", modbusAddress);
         return false;
+
     }
 
     float getTemperature() override {
