@@ -27,12 +27,14 @@ typedef struct {
 // Sensor data message structure
 typedef struct {
   uint8_t msgType;       // MessageType enum (MSG_DATA)
+  uint8_t hopCount;      // Hop limit for flooding
+  uint8_t originatorMAC[6]; // Original sender's MAC
   char sensorId[32];      // Sensor identifier
   float temperature;     // Temperature reading(-1 if not available)
   float humidity;        // Humidity reading (-1 if not available)
   float co2;            // CO2 reading (-1 if not available)
   uint32_t sequence;     // Sequence number for duplicate detection
-  
+
 } SensorDataMessage;
 
 // Peer information structure
@@ -79,6 +81,15 @@ private:
   // Static instance pointer for callbacks
   static ESPNowManager* instance;
 
+  // Duplicate packet detection cache for flooding
+  static const int SEEN_PACKET_CACHE_SIZE = 30;
+  struct PacketID {
+    uint8_t mac[6];
+    uint32_t sequence;
+    unsigned long timestamp;
+  };
+  PacketID seenPackets[SEEN_PACKET_CACHE_SIZE];
+  int seenPacketIndex;
   // Callback for received mesh data (gateway only)
   typedef void (*MeshDataCallback)(const uint8_t* senderMAC, float temp, float hum, float co2, uint32_t seq, const char* sensorId);
   MeshDataCallback meshDataCallback;
@@ -133,6 +144,29 @@ private:
     return false;
   }
 
+  // Check if a packet has been seen recently to prevent loops
+  bool hasSeenPacket(const uint8_t* mac, uint32_t seq) {
+    unsigned long now = millis();
+    const unsigned long SEEN_TIMEOUT = 60000; // 1 minute timeout
+
+    for (int i = 0; i < SEEN_PACKET_CACHE_SIZE; i++) {
+        if (memcmp(seenPackets[i].mac, mac, 6) == 0 && seenPackets[i].sequence == seq) {
+            if (now - seenPackets[i].timestamp < SEEN_TIMEOUT) {
+                return true; // Packet is fresh and a duplicate
+            }
+        }
+    }
+    return false; // Packet not seen or is stale
+  }
+
+  // Mark a packet as seen
+  void markPacketAsSeen(const uint8_t* mac, uint32_t seq) {
+      memcpy(seenPackets[seenPacketIndex].mac, mac, 6);
+      seenPackets[seenPacketIndex].sequence = seq;
+      seenPackets[seenPacketIndex].timestamp = millis();
+      seenPacketIndex = (seenPacketIndex + 1) % SEEN_PACKET_CACHE_SIZE;
+  }
+
   // Static callback handlers
   static void onDataSentStatic(const uint8_t *mac_addr, esp_now_send_status_t status) {
     if (instance) {
@@ -168,12 +202,12 @@ private:
       // Sensor received pairing acknowledgement
       handlePairAckReceived(mac_addr, data, len);
 
-    } else if (mode == "gateway" && msgType == MSG_PAIR_REQUEST) {
-      // Gateway received pairing request
+    } else if (msgType == MSG_PAIR_REQUEST) {
+      // Gateway or Sensor received a pairing request
       handlePairRequestReceived(mac_addr, data, len);
 
-    } else if (mode == "gateway" && msgType == MSG_DATA) {
-      // Gateway received sensor data
+    } else if (msgType == MSG_DATA) {
+      // Any node can receive sensor data for forwarding
       handleDataReceived(mac_addr, data, len);
     }
   }
@@ -190,9 +224,9 @@ private:
     // Multi-gateway support: choose gateway with best RSSI
     if (pairingState != PAIRED || rssi > bestGatewayRSSI + 10) {  // 10 dBm hysteresis
       if (rssi > bestGatewayRSSI || pairingState != PAIRED) {
-        Serial.printf("  └─ Mejor gateway (RSSI: %d vs %d)\n", rssi, bestGatewayRSSI);
+        Serial.printf("  └─ Mejor peer encontrado (RSSI: %d vs %d)\n", rssi, bestGatewayRSSI);
 
-        // Save gateway info
+        // Save peer info
         memcpy(gatewayMAC, mac_addr, 6);
         bestGatewayRSSI = rssi;
 
@@ -229,7 +263,7 @@ private:
 
     Serial.println("[ESP-NOW] ✓ Pairing ACK recibido");
 
-    // Add gateway as peer
+    // Add the peer that sent the ACK
     esp_now_peer_info_t peerInfo = {};
     memcpy(peerInfo.peer_addr, gatewayMAC, 6);
     peerInfo.channel = msg->channel;
@@ -239,13 +273,13 @@ private:
       esp_err_t result = esp_now_add_peer(&peerInfo);
       if (result == ESP_OK) {
         pairingState = PAIRED;
-        Serial.println("  └─ ✓ Emparejado con gateway exitosamente");
+        Serial.println("  └─ ✓ Emparejado con peer exitosamente");
       } else {
-        Serial.printf("  └─ ✗ Error agregando gateway: %d\n", result);
+        Serial.printf("  └─ ✗ Error agregando peer: %d\n", result);
       }
     } else {
       pairingState = PAIRED;
-      Serial.println("  └─ ✓ Gateway ya en lista, emparejado");
+      Serial.println("  └─ ✓ Peer ya en lista, emparejado");
     }
   }
 
@@ -265,12 +299,12 @@ private:
     if (!esp_now_is_peer_exist(mac_addr)) {
       esp_now_peer_info_t peerInfo = {};
       memcpy(peerInfo.peer_addr, mac_addr, 6);
-      peerInfo.channel = WiFi.channel();
+      peerInfo.channel = channel; // Use configured channel
       peerInfo.encrypt = false;
 
       esp_err_t result = esp_now_add_peer(&peerInfo);
       if (result == ESP_OK) {
-        Serial.printf("  └─ ✓ Peer agregado (total: %d)\n", peerCount);
+        Serial.printf("  └─ ✓ Peer agregado (total: %d)\n", getActivePeerCount());
       } else {
         Serial.printf("  └─ ✗ Error agregando peer: %d\n", result);
         return;
@@ -280,8 +314,12 @@ private:
     // Send pairing acknowledgement
     DiscoveryMessage ack;
     ack.msgType = MSG_PAIR_ACK;
-    WiFi.softAPmacAddress(ack.macAddr);  // IMPORTANT: Use SoftAP MAC!
-    ack.channel = WiFi.channel();
+    if (mode == "gateway") {
+      WiFi.softAPmacAddress(ack.macAddr);  // Gateway uses its SoftAP MAC
+    } else {
+      WiFi.macAddress(ack.macAddr);        // Sensor uses its Station MAC
+    }
+    ack.channel = channel; // Use configured channel
 
     esp_now_send(mac_addr, (uint8_t*)&ack, sizeof(ack));
     Serial.println("  └─ ✓ ACK enviado");
@@ -290,21 +328,32 @@ private:
   void handleDataReceived(const uint8_t *mac_addr, const uint8_t *data, int len) {
     if (len != sizeof(SensorDataMessage)) return;
 
-    SensorDataMessage* msg = (SensorDataMessage*)data;
+    // Create a mutable copy of the message for forwarding
+    SensorDataMessage msg;
+    memcpy(&msg, data, sizeof(SensorDataMessage));
 
-    // Update peer last seen time
-    int peerIndex = findPeerIndex(mac_addr);
-    if (peerIndex >= 0) {
-      peers[peerIndex].lastSeen = millis();
+    // 1. Duplicate check to prevent loops and storms
+    if (hasSeenPacket(msg.originatorMAC, msg.sequence)) {
+      return; // Drop duplicate packet
+    }
+    markPacketAsSeen(msg.originatorMAC, msg.sequence);
+
+    // 2. If this node is a gateway, process the data
+    if (mode == "gateway" && meshDataCallback != nullptr) {
+      Serial.printf("[ESP-NOW] Gateway got data from %s. Hops left: %d\n", msg.sensorId, msg.hopCount);
+      // Pass originator's MAC to the callback
+      meshDataCallback(msg.originatorMAC, msg.temperature, msg.humidity, msg.co2, msg.sequence, msg.sensorId);
     }
 
-    // Log received data
-    Serial.printf("[ESP-NOW] Data from sensor %s: T=%.1f H=%.1f CO2=%.0f (seq=%lu)\n",
-                  msg->sensorId, msg->temperature, msg->humidity, msg->co2, msg->sequence);
+    // 3. Forward the packet if hop limit is not reached
+    if (msg.hopCount > 1) {
+      msg.hopCount--; // Decrement hop count
 
-    // Forward to registered callback (e.g., Grafana)
-    if (meshDataCallback != nullptr) {
-      meshDataCallback(mac_addr, msg->temperature, msg->humidity, msg->co2, msg->sequence, msg->sensorId);
+      // Re-broadcast the modified message to all neighbors
+      esp_err_t result = esp_now_send(broadcastAddress, (uint8_t*)&msg, sizeof(msg));
+      if (result != ESP_OK) {
+        // Optional: log forwarding failure
+      }
     }
   }
 
@@ -313,9 +362,11 @@ public:
     : mode("sensor"), enabled(false), channel(1), beaconInterval(2000),
       discoveryTimeout(15000), sendInterval(30000), pairingState(NOT_PAIRED),
       bestGatewayRSSI(-100), lastBeaconTime(0), lastDiscoveryAttempt(0),
-      sequenceNumber(0), peerCount(0), lastPeerCleanup(0), meshDataCallback(nullptr) {
+      sequenceNumber(0), peerCount(0), lastPeerCleanup(0), seenPacketIndex(0),
+      meshDataCallback(nullptr) {
     memset(gatewayMAC, 0, 6);
     memset(peers, 0, sizeof(peers));
+    memset(seenPackets, 0, sizeof(seenPackets));
     instance = this;
   }
 
@@ -382,9 +433,9 @@ public:
     meshDataCallback = callback;
   }
 
-  // Broadcast beacon (gateway only)
+  // Broadcast beacon (gateway and sensors)
   void broadcastBeacon() {
-    if (!enabled || mode != "gateway") return;
+    if (!enabled) return;
 
     uint32_t now = millis();
     if (now - lastBeaconTime < beaconInterval) return;
@@ -393,34 +444,32 @@ public:
     beacon.msgType = MSG_BEACON;
     beacon.deviceId = ESP.getEfuseMac() & 0xFF;
 
-    // Get SoftAP MAC address
-    String macStr = WiFi.softAPmacAddress();
-    if (macStr.length() > 0) {
-      // Parse MAC string (format: "XX:XX:XX:XX:XX:XX")
-      sscanf(macStr.c_str(), "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx",
-             &beacon.macAddr[0], &beacon.macAddr[1], &beacon.macAddr[2],
-             &beacon.macAddr[3], &beacon.macAddr[4], &beacon.macAddr[5]);
+    // Use SoftAP MAC for gateway, Station MAC for sensor
+    if (mode == "gateway") {
+      String macStr = WiFi.softAPmacAddress();
+      if (macStr.length() > 0) {
+        sscanf(macStr.c_str(), "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", &beacon.macAddr[0], &beacon.macAddr[1], &beacon.macAddr[2], &beacon.macAddr[3], &beacon.macAddr[4], &beacon.macAddr[5]);
+      } else {
+        WiFi.macAddress(beacon.macAddr); // Fallback to station MAC
+      }
     } else {
-      // Fallback: use station MAC if SoftAP not available
       WiFi.macAddress(beacon.macAddr);
     }
 
     beacon.channel = channel;  // Use configured channel instead of WiFi.channel()
 
-    // Get WiFi RSSI if connected, otherwise use default value
     if (WiFi.status() == WL_CONNECTED) {
       beacon.rssi = WiFi.RSSI();
     } else {
       beacon.rssi = -50;  // Default moderate signal strength
     }
-
     beacon.timestamp = now;
 
     esp_now_send(broadcastAddress, (uint8_t*)&beacon, sizeof(beacon));
     lastBeaconTime = now;
 
-    // Periodic peer cleanup
-    if (now - lastPeerCleanup > 60000) {  // Every minute
+    // Periodic peer cleanup (gateway only)
+    if (mode == "gateway" && (now - lastPeerCleanup > 60000)) {  // Every minute
       cleanupStalePeers();
       lastPeerCleanup = now;
     }
@@ -461,33 +510,30 @@ public:
 
   // Send sensor data (sensor only)
   bool sendSensorData(float temperature, float humidity, float co2, const char* sensorId) {
-    if (!enabled || mode != "sensor" || pairingState != PAIRED) {
+    // In a flooding mesh, we don't need to be "paired" to send. We just broadcast.
+    if (!enabled || mode != "sensor") {
       return false;
     }
 
     SensorDataMessage msg;
     msg.msgType = MSG_DATA;
+    msg.hopCount = 4; // Set initial hop limit (e.g., 4)
+    WiFi.macAddress(msg.originatorMAC); // This node is the originator
     strncpy(msg.sensorId, sensorId, sizeof(msg.sensorId) - 1);
     msg.sensorId[sizeof(msg.sensorId) - 1] = '\0'; // Asegurar null-termination    msg.temperature = temperature;
     msg.humidity = humidity;
     msg.co2 = co2;
     msg.sequence = sequenceNumber++;
 
-    esp_err_t result = esp_now_send(gatewayMAC, (uint8_t*)&msg, sizeof(msg));
+    // Broadcast the data to all listening peers
+    esp_err_t result = esp_now_send(broadcastAddress, (uint8_t*)&msg, sizeof(msg));
 
     if (result == ESP_OK) {
-      Serial.printf("[ESP-NOW] Data sent: T=%.1f H=%.1f CO2=%.0f\n",
+      Serial.printf("[ESP-NOW] Data broadcasted: T=%.1f H=%.1f CO2=%.0f\n",
                     temperature, humidity, co2);
       return true;
     } else {
-      Serial.printf("[ESP-NOW] Send failed: %d\n", result);
-
-      // If send failed, mark as not paired and retry discovery
-      if (result == ESP_ERR_ESPNOW_NOT_FOUND) {
-        Serial.println("[ESP-NOW] Gateway not found, marking as unpaired");
-        pairingState = NOT_PAIRED;
-      }
-
+      Serial.printf("[ESP-NOW] Broadcast failed: %d\n", result);
       return false;
     }
   }
@@ -534,9 +580,10 @@ public:
   void update() {
     if (!enabled) return;
 
-    if (mode == "gateway") {
-      broadcastBeacon();
-    } else if (mode == "sensor") {
+    // All nodes broadcast beacons to build and maintain the mesh
+    broadcastBeacon();
+
+    if (mode == "sensor") {
       retryDiscoveryIfNeeded();
     }
   }
