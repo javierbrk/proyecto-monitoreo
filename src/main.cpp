@@ -21,6 +21,8 @@
 #ifdef SENSOR_MULTI
   #include "SensorManager.h"
   SensorManager sensorMgr;
+  // Wrapper function for endpoints.cpp to access sensors without including full header
+  std::vector<ISensor*>& getSensorList() { return sensorMgr.getSensors(); }
 #else
   #include "sensors/SensorFactory.h"
 #endif

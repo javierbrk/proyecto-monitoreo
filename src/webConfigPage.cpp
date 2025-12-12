@@ -237,40 +237,6 @@ const char* getConfigPageHTML() {
                 </div>
             </div>
 
-            <!-- RS485 Section -->
-            <div class="section">
-                <h2>RS485</h2>
-                <div class="form-group">
-                    <input type="checkbox" id="rs485_enabled" name="rs485_enabled">
-                    <label class="checkbox-label" for="rs485_enabled">Habilitar RS485</label>
-                </div>
-                <div id="rs485_config">
-                    <div class="inline-group">
-                        <div class="form-group">
-                            <label for="rs485_rx">Pin RX</label>
-                            <input type="number" id="rs485_rx" name="rs485_rx" min="0" max="39">
-                        </div>
-                        <div class="form-group">
-                            <label for="rs485_tx">Pin TX</label>
-                            <input type="number" id="rs485_tx" name="rs485_tx" min="0" max="39">
-                        </div>
-                        <div class="form-group">
-                            <label for="rs485_de">Pin DE/RE</label>
-                            <input type="number" id="rs485_de" name="rs485_de" min="-1" max="39">
-                            <div class="info-text">-1 si no usa control DE/RE</div>
-                        </div>
-                    </div>
-                    <div class="form-group">
-                        <label for="rs485_baud">Baudrate</label>
-                        <select id="rs485_baud" name="rs485_baud">
-                            <option value="4800">4800</option>
-                            <option value="9600">9600</option>
-                            <option value="19200">19200</option>
-                        </select>
-                    </div>
-                </div>
-            </div>
-
             <!-- ESP-NOW Section -->
             <div class="section">
                 <h2>ESP-NOW</h2>
@@ -318,6 +284,40 @@ const char* getConfigPageHTML() {
                 </div>
             </div>
 
+            <!-- RS485 Section -->
+            <div class="section">
+                <h2>RS485</h2>
+                <div class="form-group">
+                    <input type="checkbox" id="rs485_enabled" name="rs485_enabled">
+                    <label class="checkbox-label" for="rs485_enabled">Habilitar RS485</label>
+                </div>
+                <div id="rs485_config">
+                    <div class="inline-group">
+                        <div class="form-group">
+                            <label for="rs485_rx">Pin RX</label>
+                            <input type="number" id="rs485_rx" name="rs485_rx" min="0" max="39">
+                        </div>
+                        <div class="form-group">
+                            <label for="rs485_tx">Pin TX</label>
+                            <input type="number" id="rs485_tx" name="rs485_tx" min="0" max="39">
+                        </div>
+                        <div class="form-group">
+                            <label for="rs485_de">Pin DE/RE</label>
+                            <input type="number" id="rs485_de" name="rs485_de" min="-1" max="39">
+                            <div class="info-text">-1 si no usa control DE/RE</div>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="rs485_baud">Baudrate</label>
+                        <select id="rs485_baud" name="rs485_baud">
+                            <option value="4800">4800</option>
+                            <option value="9600">9600</option>
+                            <option value="19200">19200</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
             <!-- Sensors Section -->
             <div class="section">
                 <h2>Sensores</h2>
@@ -341,12 +341,17 @@ const char* getConfigPageHTML() {
         let currentConfig = {};
 
         // Default sensor configuration
+        // Buses: I2C, Modbus, OneWire
+        // Sensores: ADC, digital
         const DEFAULT_SENSORS = [
+            // Buses
             { type: "scd30", enabled: true, config: {} },
             { type: "bme280", enabled: false, config: {} },
-            { type: "capacitive", enabled: false, config: { pin: 34, name: "Soil1" } },
+            { type: "modbus_th", enabled: false, config: { addresses: [1], rx_pin: 16, tx_pin: 17, de_pin: 18, baudrate: 9600 } },
             { type: "onewire", enabled: false, config: { pin: 4, scan: true } },
-            { type: "modbus_th", enabled: false, config: { addresses: [1], rx_pin: 16, tx_pin: 17, de_pin: 18, baudrate: 9600 } }
+            // Sensores
+            { type: "capacitive", enabled: false, config: { pin: 34, name: "Soil1" } },
+            { type: "hd38", enabled: false, config: { analog_pin: 35, digital_pin: -1, voltage_divider: true, invert_logic: false, name: "Suelo1" } }
         ];
 
         // Load configuration on page load
@@ -553,6 +558,42 @@ const char* getConfigPageHTML() {
                         </div>
                     `;
 
+                case 'hd38':
+                    return `
+                        <div class="form-group">
+                            <label for="sensor_${index}_name">Nombre</label>
+                            <input type="text" id="sensor_${index}_name"
+                                   value="${config.name || 'Suelo1'}" placeholder="Suelo1">
+                        </div>
+                        <div class="inline-group">
+                            <div class="form-group">
+                                <label for="sensor_${index}_analog_pin">Pin Analógico</label>
+                                <input type="number" id="sensor_${index}_analog_pin"
+                                       value="${config.analog_pin || 35}" min="0" max="39">
+                            </div>
+                            <div class="form-group">
+                                <label for="sensor_${index}_digital_pin">Pin Digital</label>
+                                <input type="number" id="sensor_${index}_digital_pin"
+                                       value="${config.digital_pin !== undefined ? config.digital_pin : -1}" min="-1" max="39">
+                                <div class="info-text">-1 para desactivar</div>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <input type="checkbox" id="sensor_${index}_voltage_divider"
+                                   ${config.voltage_divider !== false ? 'checked' : ''}>
+                            <label class="checkbox-label" for="sensor_${index}_voltage_divider">
+                                Usar divisor de voltaje (sensor 5V)
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <input type="checkbox" id="sensor_${index}_invert_logic"
+                                   ${config.invert_logic ? 'checked' : ''}>
+                            <label class="checkbox-label" for="sensor_${index}_invert_logic">
+                                Invertir lógica digital
+                            </label>
+                        </div>
+                    `;
+
                 default:
                     return '<div class="info-text">Sin configuración adicional</div>';
             }
@@ -653,6 +694,21 @@ const char* getConfigPageHTML() {
                         if (rxInput) sensor.config.rx_pin = parseInt(rxInput.value);
                         if (txInput) sensor.config.tx_pin = parseInt(txInput.value);
                         if (deInput) sensor.config.de_pin = parseInt(deInput.value);
+                    }
+
+                    if (sensor.type === 'hd38') {
+                        if (!sensor.config) sensor.config = {};
+                        const nameInput = document.getElementById(`sensor_${index}_name`);
+                        const analogPinInput = document.getElementById(`sensor_${index}_analog_pin`);
+                        const digitalPinInput = document.getElementById(`sensor_${index}_digital_pin`);
+                        const voltageDividerInput = document.getElementById(`sensor_${index}_voltage_divider`);
+                        const invertLogicInput = document.getElementById(`sensor_${index}_invert_logic`);
+
+                        if (nameInput) sensor.config.name = nameInput.value;
+                        if (analogPinInput) sensor.config.analog_pin = parseInt(analogPinInput.value);
+                        if (digitalPinInput) sensor.config.digital_pin = parseInt(digitalPinInput.value);
+                        if (voltageDividerInput) sensor.config.voltage_divider = voltageDividerInput.checked;
+                        if (invertLogicInput) sensor.config.invert_logic = invertLogicInput.checked;
                     }
                 });
             }

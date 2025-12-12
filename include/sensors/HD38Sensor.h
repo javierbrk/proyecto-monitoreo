@@ -163,7 +163,7 @@ public:
 
     const char* getMeasurementsString() override {
         static char measString[64];
-        snprintf(measString, sizeof(measString), "hum=%.1f", humidity);
+        snprintf(measString, sizeof(measString), "Soil_HUM=%.1f", humidity);
         return measString;
     }
 
