@@ -10,6 +10,16 @@
 
 #include <ArduinoJson.h>
 
+#ifdef SENSOR_MULTI
+  #include <vector>
+  #include "sensors/ISensor.h"
+  // Forward declaration - SensorManager is defined in main.cpp
+  class SensorManager;
+  extern SensorManager sensorMgr;
+  // We need access to getSensors(), so declare it here
+  extern std::vector<ISensor*>& getSensorList();
+#endif
+
 #ifdef ENABLE_ESPNOW
   #include "ESPNowManager.h"
   extern ESPNowManager espnowMgr;
@@ -48,40 +58,195 @@ void handleMediciones() {
     server.send(200, "application/json", output);
 }
 
+// Helper to get sensor icon
+String getSensorIcon(const char* type) {
+    String t = String(type);
+    t.toLowerCase();
+    if (t.indexOf("scd30") >= 0 || t.indexOf("co2") >= 0) return "🌬️";
+    if (t.indexOf("bme") >= 0) return "🌡️";
+    if (t.indexOf("onewire") >= 0 || t.indexOf("ds18") >= 0) return "🌡️";
+    if (t.indexOf("capacitive") >= 0 || t.indexOf("hd38") >= 0 || t.indexOf("soil") >= 0) return "🌱";
+    if (t.indexOf("modbus") >= 0) return "📡";
+    return "📊";
+}
+
+// Check if sensor is soil moisture type (doesn't have temperature)
+bool isSoilSensor(const char* type) {
+    String t = String(type);
+    t.toLowerCase();
+    return (t.indexOf("capacitive") >= 0 || t.indexOf("hd38") >= 0 || t.indexOf("soil") >= 0);
+}
+
 void handleData() {
-    float temperature = 99, humidity = 100, co2 = 999999, presion = 99;
-    String wifiStatus = "unknown";
-    bool rotation = false;
+    String wifiStatus = (WiFi.status() == WL_CONNECTED) ? "Conectado" : "Desconectado";
+    int wifiRSSI = WiFi.RSSI();
 
-    if (sensor && sensor->isActive() && sensor->dataReady() && sensor->read()) {
-        temperature = sensor->getTemperature();
-        humidity = sensor->getHumidity();
-        co2 = sensor->getCO2();
-        wifiStatus = (WiFi.status() == WL_CONNECTED) ? "connected" : "disconnected";
+    // HTML header with minimal CSS
+    String html = "<!DOCTYPE html><html><head>";
+    html += "<meta charset='UTF-8'>";
+    html += "<meta name='viewport' content='width=device-width,initial-scale=1'>";
+    html += "<meta http-equiv='refresh' content='10'>";
+    html += "<title>Datos - Monitor</title>";
+    html += "<style>";
+    html += ":root{--g:#55d400;--o:#F39100;--r:#dc3545}";
+    html += "*{margin:0;padding:0;box-sizing:border-box}";
+    html += "body{font-family:system-ui,-apple-system,sans-serif;background:#f5f5f5;padding:15px;min-height:100vh}";
+    html += "h1{color:#333;text-align:center;margin-bottom:15px;font-size:1.4em}";
+    html += ".cards{display:flex;flex-wrap:wrap;gap:12px;justify-content:center}";
+    html += ".card{background:#fff;border-radius:8px;padding:15px;min-width:280px;max-width:350px;flex:1;";
+    html += "box-shadow:0 2px 4px rgba(0,0,0,.1);border-left:4px solid var(--g)}";
+    html += ".card.err{border-left-color:var(--r);opacity:.7}";
+    html += ".card.warn{border-left-color:var(--o)}";
+    html += ".hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}";
+    html += ".type{font-weight:600;color:#333;font-size:1.1em}";
+    html += ".id{font-size:.7em;color:#888;background:#f0f0f0;padding:2px 6px;border-radius:3px}";
+    html += ".vals{display:grid;grid-template-columns:1fr 1fr;gap:8px}";
+    html += ".val{padding:10px 8px;background:#f9f9f9;border-radius:6px;text-align:center}";
+    html += ".val span{display:block;font-size:.7em;color:#666;margin-bottom:2px}";
+    html += ".val b{font-size:1.3em;color:#333}";
+    html += ".val.ok b{color:var(--g)}.val.warn b{color:var(--o)}.val.bad b{color:var(--r)}";
+    html += ".status{text-align:center;margin-top:15px;padding:10px;background:#fff;border-radius:6px;";
+    html += "font-size:.85em;color:#666;box-shadow:0 1px 3px rgba(0,0,0,.08)}";
+    html += ".status b{color:#333}";
+    html += ".empty{text-align:center;padding:40px;color:#888}";
+    html += "</style></head><body>";
+    html += "<h1>📊 Datos de Sensores</h1>";
+    html += "<div class='cards'>";
+
+    int sensorCount = 0;
+
+#ifdef SENSOR_MULTI
+    // Multi-sensor mode
+    for (auto* s : getSensorList()) {
+        if (!s) continue;
+        sensorCount++;
+
+        bool isActive = s->isActive();
+        bool hasData = isActive && s->dataReady();
+        if (hasData) s->read();
+
+        float temp = hasData ? s->getTemperature() : -999;
+        float hum = hasData ? s->getHumidity() : -999;
+        float co2 = hasData ? s->getCO2() : -999;
+
+        bool hasError = !isActive || !hasData;
+        String cardClass = hasError ? " err" : "";
+
+        html += "<div class='card" + cardClass + "'>";
+        html += "<div class='hdr'>";
+        html += "<span class='type'>" + getSensorIcon(s->getSensorType()) + " " + String(s->getSensorType()) + "</span>";
+        html += "<span class='id'>" + String(s->getSensorID()) + "</span>";
+        html += "</div>";
+        html += "<div class='vals'>";
+
+        bool isSoil = isSoilSensor(s->getSensorType());
+
+        // Temperature (skip for soil sensors)
+        if (!isSoil && temp > -100 && temp < 100) {
+            String cls = (temp < 10 || temp > 35) ? " warn" : " ok";
+            html += "<div class='val" + cls + "'><span>🌡️ Temperatura</span><b>" + String(temp, 1) + "°C</b></div>";
+        }
+
+        // Humidity (show as "Humedad de suelo" for soil sensors)
+        if (hum >= 0 && hum <= 100) {
+            String cls, label;
+            if (isSoil) {
+                // Soil moisture: low is dry (warn), high is wet (ok)
+                cls = (hum < 30) ? " warn" : " ok";
+                label = "🌱 Humedad suelo";
+            } else {
+                cls = (hum < 30 || hum > 80) ? " warn" : " ok";
+                label = "💧 Humedad";
+            }
+            html += "<div class='val" + cls + "'><span>" + label + "</span><b>" + String(hum, 1) + "%</b></div>";
+        }
+
+        // CO2 (skip for soil sensors)
+        if (!isSoil && co2 > 0 && co2 < 10000) {
+            String cls = co2 > 1000 ? " bad" : (co2 > 800 ? " warn" : " ok");
+            html += "<div class='val" + cls + "'><span>🌬️ CO₂</span><b>" + String((int)co2) + " ppm</b></div>";
+        }
+
+        // If no valid readings
+        if ((isSoil || temp <= -100 || temp >= 100) && (hum < 0 || hum > 100) && (isSoil || co2 <= 0 || co2 >= 10000)) {
+            if (!isSoil || (hum < 0 || hum > 100)) {
+                html += "<div class='val'><span>Estado</span><b>" + String(isActive ? "Sin datos" : "Inactivo") + "</b></div>";
+            }
+        }
+
+        html += "</div></div>";
     }
-  String html = "<!DOCTYPE html><html><head>";
-  html += "<meta charset='UTF-8'>";
-  html += "<meta http-equiv='refresh' content='10'>"; // refresh every 10 seconds
-  html += "<title>Sensor Data</title>";
-  html += "<style>";
-  html += "body{font-family:Arial, sans-serif; text-align:center; background:#f4f4f4;}";
-  html += "h1{color:#333;}";
-  html += "table{margin:auto; border-collapse:collapse;}";
-  html += "td,th{padding:8px 15px; border:1px solid #ccc;}";
-  html += "</style></head><body>";
-  html += "<h1>" + String(sensor ? sensor->getSensorType() : "Unknown") + " Sensor Data</h1>";
-  html += "<table>";
-  html += "<tr><th>Temperature (°C)</th><th>Humidity (%)</th><th>CO₂ (ppm)</th><th>wifi</th></tr>";
-  html += "<tr>";
-  html += "<td>" + String(temperature, 2) + "</td>";
-  html += "<td>" + String(humidity, 2) + "</td>";
-  html += "<td>" + String(co2, 2) + "</td>";
-  html += "<td>" + wifiStatus + "</td>";
-  html += "</tr></table>";
-  html += "<p>Last update: " + String(millis() / 1000) + "s since start</p>";
-  html += "</body></html>";
+#else
+    // Single sensor mode
+    if (sensor) {
+        sensorCount = 1;
+        bool isActive = sensor->isActive();
+        bool hasData = isActive && sensor->dataReady();
+        if (hasData) sensor->read();
 
-  server.send(200, "text/html", html);
+        float temp = hasData ? sensor->getTemperature() : -999;
+        float hum = hasData ? sensor->getHumidity() : -999;
+        float co2 = hasData ? sensor->getCO2() : -999;
+
+        bool hasError = !isActive || !hasData;
+        String cardClass = hasError ? " err" : "";
+
+        html += "<div class='card" + cardClass + "'>";
+        html += "<div class='hdr'>";
+        html += "<span class='type'>" + getSensorIcon(sensor->getSensorType()) + " " + String(sensor->getSensorType()) + "</span>";
+        html += "<span class='id'>" + String(sensor->getSensorID()) + "</span>";
+        html += "</div>";
+        html += "<div class='vals'>";
+
+        bool isSoil = isSoilSensor(sensor->getSensorType());
+
+        if (!isSoil && temp > -100 && temp < 100) {
+            String cls = (temp < 10 || temp > 35) ? " warn" : " ok";
+            html += "<div class='val" + cls + "'><span>🌡️ Temperatura</span><b>" + String(temp, 1) + "°C</b></div>";
+        }
+        if (hum >= 0 && hum <= 100) {
+            String cls, label;
+            if (isSoil) {
+                cls = (hum < 30) ? " warn" : " ok";
+                label = "🌱 Humedad suelo";
+            } else {
+                cls = (hum < 30 || hum > 80) ? " warn" : " ok";
+                label = "💧 Humedad";
+            }
+            html += "<div class='val" + cls + "'><span>" + label + "</span><b>" + String(hum, 1) + "%</b></div>";
+        }
+        if (!isSoil && co2 > 0 && co2 < 10000) {
+            String cls = co2 > 1000 ? " bad" : (co2 > 800 ? " warn" : " ok");
+            html += "<div class='val" + cls + "'><span>🌬️ CO₂</span><b>" + String((int)co2) + " ppm</b></div>";
+        }
+        if ((isSoil || temp <= -100 || temp >= 100) && (hum < 0 || hum > 100) && (isSoil || co2 <= 0 || co2 >= 10000)) {
+            if (!isSoil || (hum < 0 || hum > 100)) {
+                html += "<div class='val'><span>Estado</span><b>" + String(isActive ? "Sin datos" : "Inactivo") + "</b></div>";
+            }
+        }
+
+        html += "</div></div>";
+    }
+#endif
+
+    html += "</div>";
+
+    if (sensorCount == 0) {
+        html += "<div class='empty'>No hay sensores configurados</div>";
+    }
+
+    // Status bar
+    html += "<div class='status'>";
+    html += "<b>WiFi:</b> " + wifiStatus;
+    if (WiFi.status() == WL_CONNECTED) {
+        html += " (" + String(wifiRSSI) + " dBm)";
+    }
+    html += " &nbsp;|&nbsp; <b>Sensores:</b> " + String(sensorCount);
+    html += " &nbsp;|&nbsp; <b>Uptime:</b> " + String(millis() / 1000) + "s";
+    html += "</div>";
+
+    html += "</body></html>";
+    server.send(200, "text/html", html);
 }
 
 void handleConfiguracion() {
