@@ -211,7 +211,7 @@ class ModbusUtil:
 
     def menu_select_baudrate(self):
         """Menú para seleccionar baudrate"""
-        baudrates = [4800, 9600, 19200, 38400, 115200]
+        baudrates = [4800, 9600,2400, 19200, 38400, 115200]
 
         print(f"\n{C.BOLD}Baudrates disponibles:{C.RESET}")
         for i, baud in enumerate(baudrates, 1):
@@ -337,7 +337,7 @@ class ModbusUtil:
             input(f"\n{C.DIM}Presiona Enter para continuar...{C.RESET}")
             return
 
-        baudrates = [9600, 4800, 19200, 38400]
+        baudrates = [9600, 4800,2400, 19200, 38400]
         addresses = range(1, 33)
         all_found = []
 
