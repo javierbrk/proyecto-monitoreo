@@ -47,14 +47,16 @@ private:
     // Modbus read result callbacks
     static uint16_t registerBuffer[2];
     static bool readComplete;
+    static bool readError;
 
     static bool readCallback(Modbus::ResultCode event, uint16_t transactionId, void* data) {
+        readComplete = true;
         if (event == Modbus::EX_SUCCESS) {
-            readComplete = true;
+            readError = false;
             return true;
         } else {
             Serial.printf("[ModbusTH] Read error: %02X\n", event);
-            readComplete = false;
+            readError = true;
             return false;
         }
     }
@@ -205,27 +207,37 @@ private:
         if (!sharedMb) return false;
 
         readComplete = false;
+        readError = false;
+
+        // Ensure library state is clean before starting new transaction
+        sharedMb->task();
 
         // Read 2 holding registers starting from address 1
         // Register 0 (0x00): Humidity
         // Register 1 (0x01): Temperature
         if (!sharedMb->readHreg(modbusAddress, 0, registerBuffer, 2, readCallback)) {
             Serial.printf("[ModbusTH] Addr %d: Failed to initiate read\n", modbusAddress);
+            sharedMb->task(); // Process any pending tasks cleanup
             return false;
         }
 
         // Wait for response (with timeout)
         unsigned long startTime = millis();
-        while (!readComplete && (millis() - startTime < 1000)) {
+        while (!readComplete && (millis() - startTime < 2000)) {
             sharedMb->task();
             delay(10);
         }
 
         if (!readComplete) {
             Serial.printf("[ModbusTH] Addr %d: Read timeout\n", modbusAddress);
+            Serial.printf("[ModbusTH] Addr %d: Read timeout\n", modbusAddress);
             return false;
         }
 
+        if (readError){
+            Serial.printf("[ModbusTH] Addr %d: Read error\n", modbusAddress);
+            return false;
+        }
         return true;
     }
 };
@@ -240,5 +252,6 @@ int ModbusTHSensor::busDePin = -1;
 uint32_t ModbusTHSensor::busBaudrate = 0;
 uint16_t ModbusTHSensor::registerBuffer[2] = {0, 0};
 bool ModbusTHSensor::readComplete = false;
+bool ModbusTHSensor::readError = false;
 
 #endif // MODBUS_TH_SENSOR_H
