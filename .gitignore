@@ -4,3 +4,6 @@
 .vscode/launch.json
 .vscode/ipch
 build_simulation.bat
+
+# Archivos privados con credenciales
+include/constants_private.h
