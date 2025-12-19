@@ -13,10 +13,11 @@ private:
     int txPin;
     int baudRate;
     bool useDERE;      // Whether DE/RE pins are used
+    bool enabled;      // Whether RS485 is enabled
 
 public:
     RS485Manager()
-        : serial(nullptr), dePin(-1), rePin(-1), rxPin(16), txPin(17), baudRate(9600), useDERE(false) {}
+        : serial(nullptr), dePin(-1), rePin(-1), rxPin(16), txPin(17), baudRate(9600), useDERE(false), enabled(false) {}
 
     // Initialize RS485 with optional DE/RE control
     bool init(int rx = 16, int tx = 17, int baud = 9600, int de = -1, int re = -1) {
@@ -45,7 +46,13 @@ public:
         }
 
         Serial.printf("RS485: RX=%d, TX=%d, Baud=%d\n", rxPin, txPin, baudRate);
+        enabled = true;
         return true;
+    }
+
+    // Check if RS485 is enabled
+    bool isEnabled() const {
+        return enabled;
     }
 
     // Switch to transmit mode

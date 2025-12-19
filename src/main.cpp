@@ -195,8 +195,21 @@ void setup() {
 
   #ifdef ENABLE_RS485
     Serial.println("\n[→ INFO] Configurando RS485...");
-    rs485.init(16, 17, 9600);
-    Serial.println("[✓ OK  ] RS485 habilitado (TX: GPIO17, RX: GPIO16, 9600 baud)");
+    JsonDocument rs485ConfigDoc = loadConfig();
+    bool rs485Enabled = rs485ConfigDoc["rs485_enabled"] | false;
+
+    if (rs485Enabled) {
+      int rs485Rx = rs485ConfigDoc["rs485_rx"] | 16;
+      int rs485Tx = rs485ConfigDoc["rs485_tx"] | 17;
+      int rs485Baud = rs485ConfigDoc["rs485_baud"] | 9600;
+      int rs485De = rs485ConfigDoc["rs485_de"] | -1;
+
+      rs485.init(rs485Rx, rs485Tx, rs485Baud, rs485De, rs485De);
+      Serial.printf("[✓ OK  ] RS485 habilitado (TX: GPIO%d, RX: GPIO%d, DE/RE: GPIO%d, %d baud)\n",
+                    rs485Tx, rs485Rx, rs485De, rs485Baud);
+    } else {
+      Serial.println("[→ INFO] RS485 deshabilitado en configuración");
+    }
   #endif
 
   clientSecure.setInsecure(); 
@@ -405,8 +418,10 @@ void loop() {
           sendDataGrafana(s->getMeasurementsString(), s->getSensorID());
 
           #ifdef ENABLE_RS485
-            // Enviar por RS485
-            rs485.sendSensorData(temperature, humidity, co2, s->getSensorID());
+            // Enviar por RS485 solo si está habilitado
+            if (rs485.isEnabled()) {
+              rs485.sendSensorData(temperature, humidity, co2, s->getSensorID());
+            }
           #endif
 
           #ifdef ENABLE_ESPNOW
@@ -445,8 +460,10 @@ void loop() {
       Serial.printf("Free heap after sending: %d bytes\n", ESP.getFreeHeap());
 
       #ifdef ENABLE_RS485
-        // También enviar datos por RS485
-        rs485.sendSensorData(temperature, humidity, co2, sensor ? sensor->getSensorType() : "Unknown");
+        // También enviar datos por RS485 solo si está habilitado
+        if (rs485.isEnabled()) {
+          rs485.sendSensorData(temperature, humidity, co2, sensor ? sensor->getSensorType() : "Unknown");
+        }
       #endif
     #endif
   }

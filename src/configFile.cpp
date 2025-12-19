@@ -66,6 +66,7 @@ void createConfigFile() {
     config["rs485_rx"] = 16;
     config["rs485_tx"] = 17;
     config["rs485_baud"] = 9600;
+    config["rs485_de"] = -1;
 
     // Configuración ESP-NOW (auto-adaptativo)
     config["espnow_enabled"] = false;
