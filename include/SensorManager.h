@@ -94,11 +94,8 @@ public:
 #ifdef ENABLE_RS485
             else if (strcmp(type, "modbus_th") == 0) {
                 // Modbus RTU Temperature/Humidity sensor (TH-MB-04S)
-                // Supports multiple addresses on the same bus
-                int rx = cfg["rx_pin"] | 16;
-                int tx = cfg["tx_pin"] | 17;
-                int de = cfg["de_pin"] | -1;
-                uint32_t baud = cfg["baudrate"] | 9600;
+                // Uses global RS485 bus configuration from config["rs485"]
+                // Sensor config only specifies Modbus addresses
 
                 // Check for addresses array or single address
                 std::vector<uint8_t> addrList;
@@ -113,9 +110,11 @@ public:
                     addrList.push_back(cfg["address"] | 1);
                 }
 
-                // Create sensor for each address
+                // Get RS485 bus config from global config (passed via ModbusManager singleton)
+                // ModbusManager must be initialized before sensors in main.cpp
+                // Sensor just needs its Modbus address, bus is already configured
                 for (uint8_t addr : addrList) {
-                    ISensor* s = new ModbusTHSensor(addr, rx, tx, de, baud);
+                    ISensor* s = new ModbusTHSensor(addr);
                     if (s->init()) {
                         sensors.push_back(s);
                         Serial.printf("ModbusTH sensor (addr=%d) added\n", addr);

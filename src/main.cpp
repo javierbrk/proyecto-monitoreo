@@ -181,18 +181,29 @@ void setup() {
   Serial.println("[✓ OK  ] Configuración impresa");
 
   #ifdef ENABLE_RS485
-    
-    Serial.println("\n[→ INFO] Configurando RS485...para envios seriales");
-    if (!config["rs485_enabled"] | false) {
+    Serial.println("\n[→ INFO] Configurando RS485...");
+    JsonObject rs485Cfg = config["rs485"];
+    bool rs485Enabled = rs485Cfg["enabled"] | false;
+
+    if (!rs485Enabled) {
       Serial.println("[→ INFO] RS485/Modbus deshabilitado en configuración");
-    }
-    else {
+    } else {
+      int rx = rs485Cfg["rx_pin"] | 16;
+      int tx = rs485Cfg["tx_pin"] | 17;
+      int de = rs485Cfg["de_pin"] | 18;
+      int baud = rs485Cfg["baudrate"] | 9600;
+      bool rawSendEnabled = rs485Cfg["raw_send_enabled"] | false;
+
+      Serial.printf("[→ INFO] RS485 Bus: RX=%d, TX=%d, DE=%d, Baud=%d\n", rx, tx, de, baud);
+      Serial.printf("[→ INFO] RS485 Raw Send: %s\n", rawSendEnabled ? "habilitado" : "deshabilitado");
+
       // 1. Initialize ModbusManager first (Singleton owner of the bus)
-      ModbusManager::getInstance().begin(config["rs485_rx"], config["rs485_tx"], config["rs485_de"], config["rs485_baud"]);
+      ModbusManager::getInstance().begin(rx, tx, de, baud);
 
       // 2. Initialize RS485Manager (will reuse ModbusManager's serial if available)
-      rs485.init(config["rs485_rx"], config["rs485_tx"], config["rs485_baud"], config["rs485_de"], config["rs485_de"]);
-      
+      rs485.init(rx, tx, baud, de, de);
+      rs485.setRawSendEnabled(rawSendEnabled);
+
       Serial.println("[✓ OK  ] RS485/Modbus habilitado");
       delay(100);
     }

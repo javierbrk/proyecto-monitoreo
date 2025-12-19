@@ -70,11 +70,14 @@ void createConfigFile() {
     r1c["address"] = 1;
     r1c["alias"] = "Relay 01";
 
-    // Configuración RS485
-    config["rs485_enabled"] = false;
-    config["rs485_rx"] = 16;
-    config["rs485_tx"] = 17;
-    config["rs485_baud"] = 9600;
+    // Configuración RS485 (bus compartido para sensores Modbus, relés, etc.)
+    JsonObject rs485 = config["rs485"].to<JsonObject>();
+    rs485["enabled"] = false;
+    rs485["rx_pin"] = 16;
+    rs485["tx_pin"] = 17;
+    rs485["de_pin"] = 18;
+    rs485["baudrate"] = 9600;
+    rs485["raw_send_enabled"] = false;  // Enviar datos crudos por serial
 
     // Configuración ESP-NOW (auto-adaptativo)
     config["espnow_enabled"] = false;
@@ -163,7 +166,7 @@ JsonDocument loadConfig() {
   // Automatic migration: add relays array if missing
   if (!doc["relays"].is<JsonArray>()) {
       Serial.println("[→ INFO] Migrando configuración: agregando relés por defecto");
-      
+
       JsonArray relays = doc["relays"].to<JsonArray>();
       JsonObject r1 = relays.add<JsonObject>();
       r1["type"] = "relay_2ch";
@@ -171,11 +174,72 @@ JsonDocument loadConfig() {
       JsonObject r1c = r1["config"].to<JsonObject>();
       r1c["address"] = 1;
       r1c["alias"] = "Relay 01";
-      
+
       configModified = true;
   }
 
+  // Automatic migration: convert flat rs485_* fields to nested rs485 object
+  if (!doc["rs485"].is<JsonObject>() && !doc["rs485_enabled"].isNull()) {
+      Serial.println("[→ INFO] Migrando configuración: convirtiendo RS485 a formato unificado");
 
+      JsonObject rs485 = doc["rs485"].to<JsonObject>();
+      rs485["enabled"] = doc["rs485_enabled"] | false;
+      rs485["rx_pin"] = doc["rs485_rx"] | 16;
+      rs485["tx_pin"] = doc["rs485_tx"] | 17;
+      rs485["de_pin"] = doc["rs485_de"] | 18;
+      rs485["baudrate"] = doc["rs485_baud"] | 9600;
+      rs485["raw_send_enabled"] = false;  // New field, default off
+
+      // Remove old flat fields
+      doc.remove("rs485_enabled");
+      doc.remove("rs485_rx");
+      doc.remove("rs485_tx");
+      doc.remove("rs485_de");
+      doc.remove("rs485_baud");
+
+      // Also remove per-sensor RS485 config from modbus_th sensors (use global)
+      if (doc["sensors"].is<JsonArray>()) {
+          for (JsonObject sensor : doc["sensors"].as<JsonArray>()) {
+              if (strcmp(sensor["type"] | "", "modbus_th") == 0) {
+                  JsonObject cfg = sensor["config"];
+                  if (cfg) {
+                      cfg.remove("rx_pin");
+                      cfg.remove("tx_pin");
+                      cfg.remove("de_pin");
+                      cfg.remove("baudrate");
+                  }
+              }
+          }
+      }
+
+      configModified = true;
+  }
+
+  // Automatic migration: add rs485 object if completely missing
+  if (!doc["rs485"].is<JsonObject>()) {
+      Serial.println("[→ INFO] Migrando configuración: agregando RS485 por defecto");
+
+      JsonObject rs485 = doc["rs485"].to<JsonObject>();
+      rs485["enabled"] = false;
+      rs485["rx_pin"] = 16;
+      rs485["tx_pin"] = 17;
+      rs485["de_pin"] = 18;
+      rs485["baudrate"] = 9600;
+      rs485["raw_send_enabled"] = false;
+
+      configModified = true;
+  }
+
+  // Save migrated config if modified
+  if (configModified) {
+      Serial.println("[→ INFO] Guardando configuración migrada...");
+      File outFile = SPIFFS.open(CONFIG_FILE_PATH, FILE_WRITE);
+      if (outFile) {
+          serializeJsonPretty(doc, outFile);
+          outFile.close();
+          Serial.println("[✓ OK  ] Configuración migrada guardada");
+      }
+  }
 
   return doc;
 }

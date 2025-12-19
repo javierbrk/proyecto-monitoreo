@@ -284,12 +284,15 @@ const char* getConfigPageHTML() {
                 </div>
             </div>
 
-            <!-- RS485 Section -->
+            <!-- RS485 Section (Unified Bus Config) -->
             <div class="section">
-                <h2>RS485</h2>
+                <h2>RS485 (Bus Compartido por sensores, rele o envio crudo)</h2>
+                <div class="info-text" style="background: #e3f2fd; padding: 10px; border-radius: 4px; margin-bottom: 15px;">
+                    Configuración única del bus RS485. Todos los dispositivos Modbus (sensores, relés) comparten este bus.
+                </div>
                 <div class="form-group">
                     <input type="checkbox" id="rs485_enabled" name="rs485_enabled">
-                    <label class="checkbox-label" for="rs485_enabled">Habilitar RS485</label>
+                    <label class="checkbox-label" for="rs485_enabled">Habilitar Bus RS485</label>
                 </div>
                 <div id="rs485_config">
                     <div class="inline-group">
@@ -314,6 +317,11 @@ const char* getConfigPageHTML() {
                             <option value="9600">9600</option>
                             <option value="19200">19200</option>
                         </select>
+                    </div>
+                    <div class="form-group" style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #ddd;">
+                        <input type="checkbox" id="rs485_raw_send" name="rs485_raw_send">
+                        <label class="checkbox-label" for="rs485_raw_send">Enviar datos crudos por serial</label>
+                        <div class="info-text">Envía lecturas de sensores como texto plano por RS485 (además del protocolo Modbus)</div>
                     </div>
                 </div>
             </div>
@@ -350,11 +358,12 @@ const char* getConfigPageHTML() {
         // Default sensor configuration
         // Buses: I2C, Modbus, OneWire
         // Sensores: ADC, digital
+        // Nota: modbus_th solo necesita direcciones, la config del bus RS485 es global
         const DEFAULT_SENSORS = [
             // Buses
             { type: "scd30", enabled: true, config: {} },
             { type: "bme280", enabled: false, config: {} },
-            { type: "modbus_th", enabled: false, config: { addresses: [1], rx_pin: 16, tx_pin: 17, de_pin: 18, baudrate: 9600 } },
+            { type: "modbus_th", enabled: false, config: { addresses: [1] } },
             { type: "onewire", enabled: false, config: { pin: 4, scan: true } },
             // Sensores
             { type: "capacitive", enabled: false, config: { pin: 34, name: "Soil1" } },
@@ -400,12 +409,14 @@ const char* getConfigPageHTML() {
             document.getElementById('min_hum').value = config.min_hum || '';
             document.getElementById('max_hum').value = config.max_hum || '';
 
-            // RS485
-            document.getElementById('rs485_enabled').checked = config.rs485_enabled || false;
-            document.getElementById('rs485_rx').value = config.rs485_rx || 16;
-            document.getElementById('rs485_tx').value = config.rs485_tx || 17;
-            document.getElementById('rs485_de').value = config.rs485_de !== undefined ? config.rs485_de : 18;
-            document.getElementById('rs485_baud').value = config.rs485_baud || 9600;
+            // RS485 (nested object structure)
+            const rs485 = config.rs485 || {};
+            document.getElementById('rs485_enabled').checked = rs485.enabled || false;
+            document.getElementById('rs485_rx').value = rs485.rx_pin !== undefined ? rs485.rx_pin : 16;
+            document.getElementById('rs485_tx').value = rs485.tx_pin !== undefined ? rs485.tx_pin : 17;
+            document.getElementById('rs485_de').value = rs485.de_pin !== undefined ? rs485.de_pin : 18;
+            document.getElementById('rs485_baud').value = rs485.baudrate || 9600;
+            document.getElementById('rs485_raw_send').checked = rs485.raw_send_enabled || false;
 
             // Toggle RS485 config visibility
             toggleRS485Config();
@@ -533,6 +544,7 @@ const char* getConfigPageHTML() {
 
                 case 'modbus_th':
                     // Support both 'addresses' array and legacy 'address' single value
+                    // RS485 bus config is now global - sensor only needs addresses
                     const addrList = config.addresses || (config.address ? [config.address] : [1]);
                     const addrStr = Array.isArray(addrList) ? addrList.join(', ') : addrList;
                     return `
@@ -540,35 +552,7 @@ const char* getConfigPageHTML() {
                             <label for="sensor_${index}_addresses">Direcciones Modbus</label>
                             <input type="text" id="sensor_${index}_addresses"
                                    value="${addrStr}" placeholder="1, 45, 3">
-                            <div class="info-text">Separar con comas para multiples sensores en el mismo bus</div>
-                        </div>
-                        <div class="inline-group">
-                            <div class="form-group">
-                                <label for="sensor_${index}_baudrate">Baudrate</label>
-                                <select id="sensor_${index}_baudrate">
-                                    <option value="4800" ${config.baudrate == 4800 ? 'selected' : ''}>4800</option>
-                                    <option value="9600" ${config.baudrate == 9600 ? 'selected' : ''}>9600</option>
-                                    <option value="19200" ${config.baudrate == 19200 ? 'selected' : ''}>19200</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label for="sensor_${index}_de_pin">Pin DE/RE</label>
-                                <input type="number" id="sensor_${index}_de_pin"
-                                       value="${config.de_pin !== undefined ? config.de_pin : 18}" min="-1" max="39">
-                                <div class="info-text">-1 si no usa</div>
-                            </div>
-                        </div>
-                        <div class="inline-group">
-                            <div class="form-group">
-                                <label for="sensor_${index}_rx_pin">Pin RX</label>
-                                <input type="number" id="sensor_${index}_rx_pin"
-                                       value="${config.rx_pin || 16}" min="0" max="39">
-                            </div>
-                            <div class="form-group">
-                                <label for="sensor_${index}_tx_pin">Pin TX</label>
-                                <input type="number" id="sensor_${index}_tx_pin"
-                                       value="${config.tx_pin || 17}" min="0" max="39">
-                            </div>
+                            <div class="info-text">Separar con comas para múltiples sensores. Usa la config RS485 global para pines y baudrate.</div>
                         </div>
                     `;
 
@@ -702,12 +686,21 @@ const char* getConfigPageHTML() {
             config.min_hum = parseInt(document.getElementById('min_hum').value);
             config.max_hum = parseInt(document.getElementById('max_hum').value);
 
-            // RS485
-            config.rs485_enabled = document.getElementById('rs485_enabled').checked;
-            config.rs485_rx = parseInt(document.getElementById('rs485_rx').value);
-            config.rs485_tx = parseInt(document.getElementById('rs485_tx').value);
-            config.rs485_de = parseInt(document.getElementById('rs485_de').value);
-            config.rs485_baud = parseInt(document.getElementById('rs485_baud').value);
+            // RS485 (nested object structure)
+            config.rs485 = {
+                enabled: document.getElementById('rs485_enabled').checked,
+                rx_pin: parseInt(document.getElementById('rs485_rx').value),
+                tx_pin: parseInt(document.getElementById('rs485_tx').value),
+                de_pin: parseInt(document.getElementById('rs485_de').value),
+                baudrate: parseInt(document.getElementById('rs485_baud').value),
+                raw_send_enabled: document.getElementById('rs485_raw_send').checked
+            };
+            // Remove old flat fields if they exist (migration cleanup)
+            delete config.rs485_enabled;
+            delete config.rs485_rx;
+            delete config.rs485_tx;
+            delete config.rs485_de;
+            delete config.rs485_baud;
 
             // ESP-NOW
             config.espnow_enabled = document.getElementById('espnow_enabled').checked;
@@ -739,24 +732,22 @@ const char* getConfigPageHTML() {
                     if (sensor.type === 'modbus_th') {
                         if (!sensor.config) sensor.config = {};
                         const addrInput = document.getElementById(`sensor_${index}_addresses`);
-                        const baudInput = document.getElementById(`sensor_${index}_baudrate`);
-                        const rxInput = document.getElementById(`sensor_${index}_rx_pin`);
-                        const txInput = document.getElementById(`sensor_${index}_tx_pin`);
-                        const deInput = document.getElementById(`sensor_${index}_de_pin`);
 
                         // Parse comma-separated addresses into array
+                        // RS485 bus config is now global, sensor only needs addresses
                         if (addrInput) {
                             const addrStr = addrInput.value.trim();
                             const addrArray = addrStr.split(',')
                                 .map(s => parseInt(s.trim()))
                                 .filter(n => !isNaN(n) && n >= 1 && n <= 254);
                             sensor.config.addresses = addrArray.length > 0 ? addrArray : [1];
-                            delete sensor.config.address;  // Remove legacy field
                         }
-                        if (baudInput) sensor.config.baudrate = parseInt(baudInput.value);
-                        if (rxInput) sensor.config.rx_pin = parseInt(rxInput.value);
-                        if (txInput) sensor.config.tx_pin = parseInt(txInput.value);
-                        if (deInput) sensor.config.de_pin = parseInt(deInput.value);
+                        // Remove legacy per-sensor RS485 fields (now global)
+                        delete sensor.config.address;
+                        delete sensor.config.rx_pin;
+                        delete sensor.config.tx_pin;
+                        delete sensor.config.de_pin;
+                        delete sensor.config.baudrate;
                     }
 
                     if (sensor.type === 'hd38') {

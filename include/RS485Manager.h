@@ -14,10 +14,21 @@ private:
     int txPin;
     int baudRate;
     bool useDERE;      // Whether DE/RE pins are used
+    bool rawSendEnabled;  // Whether raw serial sending is enabled
 
 public:
     RS485Manager()
-        : serial(nullptr), dePin(-1), rePin(-1), rxPin(16), txPin(17), baudRate(9600), useDERE(false) {}
+        : serial(nullptr), dePin(-1), rePin(-1), rxPin(16), txPin(17), baudRate(9600), useDERE(false), rawSendEnabled(false) {}
+
+    // Enable/disable raw serial sending
+    void setRawSendEnabled(bool enabled) {
+        rawSendEnabled = enabled;
+        Serial.printf("[RS485] Raw send %s\n", enabled ? "enabled" : "disabled");
+    }
+
+    bool isRawSendEnabled() const {
+        return rawSendEnabled;
+    }
 
     // Initialize RS485 with optional DE/RE control
     bool init(int rx = 16, int tx = 17, int baud = 9600, int de = -1, int re = -1) {
@@ -90,8 +101,12 @@ public:
         setReceiveMode();
     }
 
-    // Send formatted data
+    // Send formatted data (only if raw send is enabled)
     void sendSensorData(float temperature, float humidity, float co2, const char* sensorType) {
+        if (!rawSendEnabled) {
+            return;  // Raw sending disabled, skip
+        }
+
         String message = String(sensorType) + " - ";
 
         if (temperature >= 0) {

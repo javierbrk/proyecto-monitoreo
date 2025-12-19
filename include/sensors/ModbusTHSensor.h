@@ -11,26 +11,23 @@
  *
  * Protocolo: Modbus RTU sobre RS485
  * Registros:
- *   - 1 (0x01): Humedad (int16 * 10, ej: 399 = 39.9% RH)
- *   - 2 (0x02): Temperatura (int16 * 10, ej: 282 = 28.2°C)
+ *   - 0 (0x00): Humedad (int16 * 10, ej: 399 = 39.9% RH)
+ *   - 1 (0x01): Temperatura (int16 * 10, ej: 282 = 28.2°C)
  *
  * Soporta multiples sensores en el mismo bus RS485 con diferentes direcciones.
- * El bus se inicializa una sola vez y se comparte entre todas las instancias.
+ * El bus se inicializa una sola vez via ModbusManager (configuración global rs485).
+ * El sensor solo necesita su dirección Modbus.
  *
  * Config:
  *   - address: Direccion Modbus (1-254)
- *   - rxPin: GPIO RX RS485 (default 16)
- *   - txPin: GPIO TX RS485 (default 17)
- *   - dePin: GPIO DE/RE control (default 18, -1 si no usa)
- *   - baudrate: Baudrate RS485 (default 9600)
+ *
+ * Nota: La configuración del bus RS485 (rx, tx, de, baudrate) es global
+ *       y se configura en config["rs485"]. ModbusManager debe estar
+ *       inicializado antes de crear sensores.
  */
 class ModbusTHSensor : public ISensor {
 private:
     uint8_t modbusAddress;
-    int rxPin;
-    int txPin;
-    int dePin;
-    uint32_t baudrate;
 
     float temperature = 999;
     float humidity = 99;
@@ -55,22 +52,9 @@ private:
         }
     }
 
-    // Initialize shared bus (only once)
-    static bool initBus(int rx, int tx, int de, uint32_t baud) {
-        return ModbusManager::getInstance().begin(rx, tx, de, baud);
-    }
-
 public:
-    ModbusTHSensor(uint8_t address = 1,
-                   int rx = 16,
-                   int tx = 17,
-                   int de = 18,
-                   uint32_t baud = 9600)
+    ModbusTHSensor(uint8_t address = 1)
         : modbusAddress(address),
-          rxPin(rx),
-          txPin(tx),
-          dePin(de),
-          baudrate(baud),
           temperature(-1),
           humidity(-1),
           active(false),
@@ -81,9 +65,9 @@ public:
     bool init() override {
         Serial.printf("[ModbusTH] Initializing sensor addr=%d\n", modbusAddress);
 
-        // Initialize shared bus
-        if (!initBus(rxPin, txPin, dePin, baudrate)) {
-            Serial.println("[ModbusTH] Failed to initialize bus");
+        // Check if ModbusManager is initialized (bus configured globally in main.cpp)
+        if (!ModbusManager::getInstance().isInitialized()) {
+            Serial.println("[ModbusTH] ModbusManager not initialized - RS485 bus not configured");
             return false;
         }
 
