@@ -246,7 +246,7 @@ void handleData() {
             bool isActive = r->isActive();
             if (isActive) {
                 r->syncState(); // Sync with hardware
-                // r->syncInputs(); // Sync inputs - DISABLED until fixed
+                r->syncInputs(); // Sync inputs - DISABLED until fixed
             }
             
             String cardClass = isActive ? "" : " err";
@@ -270,13 +270,13 @@ void handleData() {
                     html += "<span>Canal " + String(i+1) + "</span><b>" + label + "</b></div>";
                 }
 
-                /*// Add Input States - DISABLED until fixed
+                // Add Input States - DISABLED until fixed
                 for(int i=0; i<2; i++) {
                     bool state = r->getInputState(i);
                     String cls = state ? "ok" : "warn";
                     String label = state ? "ON" : "OFF";
                     html += "<div class='val " + cls + "'><span>Input " + String(i+1) + "</span><b>" + label + "</b></div>";
-                }*/
+                }
             } else {
                 html += "<div class='val' style='grid-column:span 2;'><span>Estado</span><b>Inactivo</b></div>";
             }

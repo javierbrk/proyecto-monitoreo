@@ -36,6 +36,7 @@ private:
     static bool modbusCallback(Modbus::ResultCode event, uint16_t transactionId, void* data) {
         _cbComplete = true;
         _cbError = (event != Modbus::EX_SUCCESS);
+        Serial.printf("[Relay Modbus Callback] Result: %d\n", event);
         return true;
     }
 
@@ -83,6 +84,7 @@ public:
     }
 
     bool isActive() {
+        return true;
         if (_active) {
             _inactiveCheckCount = 0;
             return true;
@@ -107,11 +109,18 @@ public:
         ModbusRTU* mb = ModbusManager::getInstance().getModbus();
         if (!mb) return false;
 
+        delay(20); // Allow slave to process previous command
+
         Serial.printf("[Relay %d] Setting channel %d to %s\n", _address, channel, state ? "ON" : "OFF");
+
+        mb->task();
 
         _cbComplete = false;
         _cbError = false;
-        mb->writeCoil(_address, channel, state, modbusCallback);
+        
+        if (!mb->writeCoil(_address, channel, state, modbusCallback)) {
+            return false;
+        }
 
         unsigned long start = millis();
         while (!_cbComplete && millis() - start < 1000) {
@@ -128,9 +137,9 @@ public:
 
         _failureCount++;
         Serial.printf("[Relay %d] Set channel %d FAILED (failures: %d)\n", _address, channel, _failureCount);
-        if (_failureCount >= 3) {
+        if (_failureCount >= 5) {
             _active = false;
-            Serial.printf("[Relay %d] Disabled after 3 consecutive failures\n", _address);
+            Serial.printf("[Relay %d] Disabled after 5 consecutive failures\n", _address);
         }
         return false;
     }
@@ -151,30 +160,37 @@ public:
         ModbusRTU* mb = ModbusManager::getInstance().getModbus();
         if (!mb) return false;
 
+        delay(50); // Allow slave to process previous command
+
+        mb->task();
+
         _cbComplete = false;
         _cbError = false;
         
-        bool coils[2];
-        mb->readCoil(_address, 0, coils, 2, modbusCallback);
-        
-        unsigned long start = millis();
-        while (!_cbComplete && millis() - start < 1000) {
-            mb->task();
-            delay(10);
+        // Try reading 8 coils (byte alignment) which is often more compatible
+        bool coils[8];
+        // Attempt block read, but don't return false immediately if it fails to start
+        if (mb->readCoil(_address, 0, coils, 8, modbusCallback)) {
+            unsigned long start = millis();
+            while (!_cbComplete && millis() - start < 1000) {
+                mb->task();
+                delay(10);
+            }
         }
         
         if (_cbComplete && !_cbError) {
             _relayState[0] = coils[0];
             _relayState[1] = coils[1];
             _failureCount = 0; // Reset on success
+            Serial.printf("[Relay %d] syncState successful\n", _address);
+            Serial.printf("[Relay %d] Relay states: R0=%d, R1=%d\n", _address, _relayState[0], _relayState[1]);
             return true;
         }
-
         _failureCount++;
         Serial.printf("[Relay %d] syncState FAILED (failures: %d)\n", _address, _failureCount);
-        if (_failureCount >= 3) {
+        if (_failureCount >= 5) {
             _active = false;
-            Serial.printf("[Relay %d] Disabled after 3 consecutive failures\n", _address);
+            Serial.printf("[Relay %d] Disabled after 5 consecutive failures\n", _address);
         }
         return false;
     }
@@ -185,11 +201,16 @@ public:
 
         Serial.printf("[Relay %d] Reading inputs...\n", _address);
 
+        mb->task();
+
         _cbComplete = false;
         _cbError = false;
         
         bool inputs[8]; 
-        mb->readIsts(_address, 0, inputs, 8, modbusCallback);
+        if (!mb->readIsts(_address, 0, inputs, 8, modbusCallback)) {
+            Serial.printf("[Relay %d] Error reading inputs\n", _address);
+            return false;
+        }
         
         unsigned long start = millis();
         while (!_cbComplete && millis() - start < 1000) {
@@ -214,35 +235,6 @@ public:
         return false;
     }
 
-    /**
-     * Read input state (IN1)
-     * Returns 1 if active, 0 if inactive, -1 on error
-     */
-    int readInput() {
-        ModbusRTU* mb = ModbusManager::getInstance().getModbus();
-        if (!mb) return -1;
-
-        _cbComplete = false;
-        _cbError = false;
-        
-        bool inputs[8]; // Buffer for inputs (Module returns 8 bits usually)
-        
-        // Read Discrete Inputs (Function 02)
-        // Start Address 0, Count 8 (to be safe, or 1)
-        mb->readIsts(_address, 0, inputs, 8, modbusCallback);
-        
-        unsigned long start = millis();
-        while (!_cbComplete && millis() - start < 1000) {
-            mb->task();
-            delay(10);
-        }
-        
-        if (_cbComplete && !_cbError) {
-            // IN1 corresponds to the first bit usually
-            return inputs[0] ? 1 : 0;
-        }
-        return -1;
-    }
 
     /**
      * Get JSON representation for Web UI

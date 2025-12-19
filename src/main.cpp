@@ -174,11 +174,31 @@ void setup() {
   // Load configuration ONCE for all modules
   JsonDocument config = loadConfig();
 
-  // Initialize Relays
-  Serial.println("\n[→ INFO] Inicializando Relés...");
-  relayMgr.loadFromConfig(config);
-  Serial.printf("[✓ OK  ] %d relés configurados\n", relayMgr.getRelays().size());
+  Serial.println("\n[→ INFO] Configuración cargada:");
+  String configOutput;
+  serializeJsonPretty(config, configOutput);
+  Serial.println(configOutput);
+  Serial.println("[✓ OK  ] Configuración impresa");
 
+  #ifdef ENABLE_RS485
+    
+    Serial.println("\n[→ INFO] Configurando RS485...para envios seriales");
+    if (!config["rs485_enabled"] | false) {
+      Serial.println("[→ INFO] RS485/Modbus deshabilitado en configuración");
+    }
+    else {
+      // 1. Initialize ModbusManager first (Singleton owner of the bus)
+      ModbusManager::getInstance().begin(config["rs485_rx"], config["rs485_tx"], config["rs485_de"], config["rs485_baud"]);
+
+      // 2. Initialize RS485Manager (will reuse ModbusManager's serial if available)
+      rs485.init(config["rs485_rx"], config["rs485_tx"], config["rs485_baud"], config["rs485_de"], config["rs485_de"]);
+      
+      Serial.println("[✓ OK  ] RS485/Modbus habilitado");
+      delay(100);
+    }
+  #endif
+
+  
   Serial.println("\n[→ INFO] Inicializando sensores...");
   #ifdef SENSOR_MULTI
     sensorMgr.loadFromConfig(config);
@@ -193,6 +213,15 @@ void setup() {
         Serial.printf("  └─ %s\n", sensorId.c_str());
       }
     }
+
+  // Initialize Relays
+  Serial.println("\n[→ INFO] Inicializando Relés...");
+  relayMgr.loadFromConfig(config);
+  Serial.printf("[✓ OK  ] %d relés configurados\n", relayMgr.getRelays().size());
+     // Initialize relays to verify connection
+    for (auto* r : relayMgr.getRelays()) {
+        if (r) r->init();
+    }
   #else
     sensor = SensorFactory::createSensor();
     if (sensor) {
@@ -204,18 +233,6 @@ void setup() {
     } else {
       Serial.println("[✗ ERR ] No se pudo crear el sensor");
     }
-  #endif
-
-  #ifdef ENABLE_RS485
-    Serial.println("\n[→ INFO] Configurando RS485...");
-    
-    // 1. Initialize ModbusManager first (Singleton owner of the bus)
-    ModbusManager::getInstance().begin(config["rs485_rx"], config["rs485_tx"], config["rs485_de"], config["rs485_baud"]);
-
-    // 2. Initialize RS485Manager (will reuse ModbusManager's serial if available)
-    rs485.init(config["rs485_rx"], config["rs485_tx"], config["rs485_baud"], config["rs485_de"], config["rs485_de"]);
-    
-    Serial.println("[✓ OK  ] RS485/Modbus habilitado");
   #endif
 
   clientSecure.setInsecure(); 
@@ -478,7 +495,7 @@ void loop() {
     for (auto* r : relayMgr.getRelays()) {
         if (r && r->isActive()) {
             r->syncState();
-            // r->syncInputs(); // DISABLED until fixed
+            r->syncInputs(); 
             
             String data = r->getGrafanaString();
             String id = r->getAlias();
