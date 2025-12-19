@@ -3,6 +3,8 @@
 
 #include <Arduino.h>
 #include <HardwareSerial.h>
+#include "ModbusManager.h"
+#include "debug.h"
 
 class RS485Manager {
 private:
@@ -13,14 +15,35 @@ private:
     int txPin;
     int baudRate;
     bool useDERE;      // Whether DE/RE pins are used
-    bool enabled;      // Whether RS485 is enabled
+    bool rawSendEnabled;  // Whether raw serial sending is enabled
 
 public:
     RS485Manager()
-        : serial(nullptr), dePin(-1), rePin(-1), rxPin(16), txPin(17), baudRate(9600), useDERE(false), enabled(false) {}
+        : serial(nullptr), dePin(-1), rePin(-1), rxPin(16), txPin(17), baudRate(9600), useDERE(false), rawSendEnabled(false) {}
+
+    // Enable/disable raw serial sending
+    void setRawSendEnabled(bool enabled) {
+        rawSendEnabled = enabled;
+        DBG_INFO("[RS485] Raw send %s\n", enabled ? "on" : "off");
+    }
+
+    bool isRawSendEnabled() const {
+        return rawSendEnabled;
+    }
 
     // Initialize RS485 with optional DE/RE control
     bool init(int rx = 16, int tx = 17, int baud = 9600, int de = -1, int re = -1) {
+        // Check if ModbusManager has already initialized the bus
+        if (ModbusManager::getInstance().isInitialized()) {
+            serial = ModbusManager::getInstance().getSerial();
+            dePin = ModbusManager::getInstance().getDEPin();
+            rePin = dePin; // Assume shared DE/RE pin logic from Modbus config
+            useDERE = (dePin >= 0);
+            
+            DBG_INFO("[RS485] Reusing ModbusMgr serial\n");
+            return true;
+        }
+
         rxPin = rx;
         txPin = tx;
         baudRate = baud;
@@ -39,20 +62,14 @@ public:
             pinMode(rePin, OUTPUT);
             setReceiveMode();  // Default to receive mode
             useDERE = true;
-            Serial.printf("RS485 inicializado con control DE/RE (pins %d,%d)\n", dePin, rePin);
+            DBG_INFO("[RS485] DE/RE pins %d,%d\n", dePin, rePin);
         } else {
             useDERE = false;
-            Serial.println("RS485 inicializado sin control DE/RE (puenteado)");
+            DBG_INFO("[RS485] No DE/RE (bridged)\n");
         }
 
-        Serial.printf("RS485: RX=%d, TX=%d, Baud=%d\n", rxPin, txPin, baudRate);
-        enabled = true;
+        DBG_INFO("[RS485] RX=%d TX=%d baud=%d\n", rxPin, txPin, baudRate);
         return true;
-    }
-
-    // Check if RS485 is enabled
-    bool isEnabled() const {
-        return enabled;
     }
 
     // Switch to transmit mode
@@ -85,8 +102,12 @@ public:
         setReceiveMode();
     }
 
-    // Send formatted data
+    // Send formatted data (only if raw send is enabled)
     void sendSensorData(float temperature, float humidity, float co2, const char* sensorType) {
+        if (!rawSendEnabled) {
+            return;  // Raw sending disabled, skip
+        }
+
         String message = String(sensorType) + " - ";
 
         if (temperature >= 0) {
@@ -100,7 +121,7 @@ public:
         }
 
         send(message + "\r\n");
-        Serial.println("[RS485 TX] " + message);
+        DBG_VERBOSE("[RS485 TX] %s\n", message.c_str());
     }
 
     // Receive data (for bidirectional communication)

@@ -2,9 +2,13 @@
 #define SENSOR_SIMULATED_H
 
 #include "ISensor.h"
+#include "ITemperatureSensor.h"
+#include "IHumiditySensor.h"
+#include "ICO2Sensor.h"
 #include <Arduino.h>
+#include "../debug.h"
 
-class SensorSimulated : public ISensor {
+class SensorSimulated : public ITemperatureSensor, public IHumiditySensor, public ICO2Sensor {
 private:
     bool active;
     float temperature;
@@ -16,7 +20,7 @@ public:
 
     bool init() override {
         active = true;
-        Serial.println("Modo simulación activado - datos aleatorios");
+        DBG_INFO("[Simulated] OK - random mode\n");
         return true;
     }
 
@@ -35,16 +39,24 @@ public:
         return true;
     }
 
+    // ITemperatureSensor
     float getTemperature() override { return temperature; }
+
+    // IHumiditySensor
     float getHumidity() override { return humidity; }
+
+    // ICO2Sensor
     float getCO2() override { return co2; }
+
     const char* getSensorType() override { return "Simulated"; }
     const char* getSensorID() override { return "sim-001"; }
+
     const char* getMeasurementsString() override {
         static char measString[64];
-        snprintf(measString, sizeof(measString), "temp=%.2f,hum=%.2f,co2=%.2f", temperature, humidity, co2);
+        snprintf(measString, sizeof(measString), "temp=%.1f,hum=%.1f,co2=%.0f", temperature, humidity, co2);
         return measString;
     }
+
     bool isActive() override { return active; }
 };
 

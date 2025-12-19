@@ -5,23 +5,21 @@
 #include "configFile.h"
 #include "globals.h"
 #include "constants.h"
+#include "debug.h"
 
 
 
 void createConfigFile() {
-    
-    //SPIFFS.remove(path);
-
     if (SPIFFS.exists(CONFIG_FILE_PATH)) {
-      Serial.println("Archivo de configuración ya existe.");
+      DBG_VERBOSE("Config exists\n");
       return;
     }
-  
-    Serial.println("Creando archivo de configuración...");
-  
+
+    DBG_INFO("Creating config...\n");
+
     File file = SPIFFS.open(CONFIG_FILE_PATH, FILE_WRITE);
     if (!file) {
-      Serial.println("Error al abrir config.json para escritura.");
+      DBG_ERROR("Open config.json failed\n");
       return;
     }
   
@@ -61,12 +59,23 @@ void createConfigFile() {
     onewireCfg["pin"] = 4;
     onewireCfg["scan"] = true;
 
-    // Configuración RS485
-    config["rs485_enabled"] = false;
-    config["rs485_rx"] = 16;
-    config["rs485_tx"] = 17;
-    config["rs485_baud"] = 9600;
-    config["rs485_de"] = -1;
+    // Configuración de Relays
+    JsonArray relays = config["relays"].to<JsonArray>();
+    JsonObject r1 = relays.add<JsonObject>();
+    r1["type"] = "relay_2ch";
+    r1["enabled"] = false;
+    JsonObject r1c = r1["config"].to<JsonObject>();
+    r1c["address"] = 1;
+    r1c["alias"] = "Relay 01";
+
+    // Configuración RS485 (bus compartido para sensores Modbus, relés, etc.)
+    JsonObject rs485 = config["rs485"].to<JsonObject>();
+    rs485["enabled"] = false;
+    rs485["rx_pin"] = 16;
+    rs485["tx_pin"] = 17;
+    rs485["de_pin"] = 18;
+    rs485["baudrate"] = 9600;
+    rs485["raw_send_enabled"] = false;  // Enviar datos crudos por serial
 
     // Configuración ESP-NOW (auto-adaptativo)
     config["espnow_enabled"] = false;
@@ -78,9 +87,9 @@ void createConfigFile() {
     config["grafana_ping_url"] = "http://192.168.1.1/ping";  // URL for connectivity test
 
     if (serializeJsonPretty(config, file) == 0) {
-      Serial.println("Error al escribir JSON en archivo.");
+      DBG_ERROR("Write JSON failed\n");
     } else {
-      Serial.println("Archivo config.json creado correctamente.");
+      DBG_INFO("Config created\n");
     }
 
     file.close();
@@ -89,7 +98,7 @@ void createConfigFile() {
 String getConfigFile() {
   File file = SPIFFS.open(CONFIG_FILE_PATH, FILE_READ);
   if (!file || file.isDirectory()) {
-      Serial.println("Error al abrir config.json");
+      DBG_ERROR("Open config failed\n");
       return String();
   }
   String json = file.readString();
@@ -102,22 +111,23 @@ JsonDocument loadConfig() {
 
   File file = SPIFFS.open(CONFIG_FILE_PATH, FILE_READ);
   if (!file || file.isDirectory()) {
-      Serial.println("Error al abrir config.json para lectura");
-      return doc;  // Empty document
+      DBG_ERROR("Open config failed\n");
+      return doc;
   }
 
   DeserializationError error = deserializeJson(doc, file);
   file.close();
 
   if (error) {
-      Serial.print("Error deserializando config.json: ");
-      Serial.println(error.c_str());
+      DBG_ERROR("JSON error: %s\n", error.c_str());
       return doc;
   }
 
+  bool configModified = false;
+
   // Automatic migration: add sensors array if missing
   if (!doc["sensors"].is<JsonArray>() || doc["sensors"].size() == 0) {
-      Serial.println("[→ INFO] Migrando configuración: agregando sensores por defecto");
+      DBG_INFO("Migrating: adding sensors\n");
 
       JsonArray sensors = doc["sensors"].to<JsonArray>();
 
@@ -146,12 +156,85 @@ JsonDocument loadConfig() {
       JsonObject onewireCfg = onewire["config"].to<JsonObject>();
       onewireCfg["pin"] = 4;
       onewireCfg["scan"] = true;
+      
+      configModified = true;
+  }
 
-      // Save migrated config
-      if (updateConfig(doc)) {
-          Serial.println("[✓ OK  ] Configuración migrada exitosamente");
-      } else {
-          Serial.println("[✗ ERR ] Error al guardar configuración migrada");
+  // Automatic migration: add relays array if missing
+  if (!doc["relays"].is<JsonArray>()) {
+      DBG_INFO("Migrating: adding relays\n");
+
+      JsonArray relays = doc["relays"].to<JsonArray>();
+      JsonObject r1 = relays.add<JsonObject>();
+      r1["type"] = "relay_2ch";
+      r1["enabled"] = false;
+      JsonObject r1c = r1["config"].to<JsonObject>();
+      r1c["address"] = 1;
+      r1c["alias"] = "Relay 01";
+
+      configModified = true;
+  }
+
+  // Automatic migration: convert flat rs485_* fields to nested rs485 object
+  if (!doc["rs485"].is<JsonObject>() && !doc["rs485_enabled"].isNull()) {
+      DBG_INFO("Migrating: RS485 format\n");
+
+      JsonObject rs485 = doc["rs485"].to<JsonObject>();
+      rs485["enabled"] = doc["rs485_enabled"] | false;
+      rs485["rx_pin"] = doc["rs485_rx"] | 16;
+      rs485["tx_pin"] = doc["rs485_tx"] | 17;
+      rs485["de_pin"] = doc["rs485_de"] | 18;
+      rs485["baudrate"] = doc["rs485_baud"] | 9600;
+      rs485["raw_send_enabled"] = false;  // New field, default off
+
+      // Remove old flat fields
+      doc.remove("rs485_enabled");
+      doc.remove("rs485_rx");
+      doc.remove("rs485_tx");
+      doc.remove("rs485_de");
+      doc.remove("rs485_baud");
+
+      // Also remove per-sensor RS485 config from modbus_th sensors (use global)
+      if (doc["sensors"].is<JsonArray>()) {
+          for (JsonObject sensor : doc["sensors"].as<JsonArray>()) {
+              if (strcmp(sensor["type"] | "", "modbus_th") == 0) {
+                  JsonObject cfg = sensor["config"];
+                  if (cfg) {
+                      cfg.remove("rx_pin");
+                      cfg.remove("tx_pin");
+                      cfg.remove("de_pin");
+                      cfg.remove("baudrate");
+                  }
+              }
+          }
+      }
+
+      configModified = true;
+  }
+
+  // Automatic migration: add rs485 object if completely missing
+  if (!doc["rs485"].is<JsonObject>()) {
+      DBG_INFO("Migrating: adding RS485\n");
+
+      JsonObject rs485 = doc["rs485"].to<JsonObject>();
+      rs485["enabled"] = false;
+      rs485["rx_pin"] = 16;
+      rs485["tx_pin"] = 17;
+      rs485["de_pin"] = 18;
+      rs485["baudrate"] = 9600;
+      rs485["raw_send_enabled"] = false;
+
+      configModified = true;
+  }
+
+  // Save migrated config if modified
+  if (configModified) {
+      DBG_INFO("Saving migrated config...\n");
+      File outFile = SPIFFS.open(CONFIG_FILE_PATH, FILE_WRITE);
+      if (outFile) {
+          serializeJsonPretty(doc, outFile);
+          outFile.close();
+          DBG_INFO("Migration saved\n");
       }
   }
 
@@ -159,26 +242,23 @@ JsonDocument loadConfig() {
 }
 
 bool updateConfig(JsonDocument& newConfig) {
-  // Remove existing config file
   if (SPIFFS.exists(CONFIG_FILE_PATH)) {
     SPIFFS.remove(CONFIG_FILE_PATH);
   }
 
-  // Write new config
   File file = SPIFFS.open(CONFIG_FILE_PATH, FILE_WRITE);
   if (!file) {
-    Serial.println("Error al abrir config.json para escritura");
+    DBG_ERROR("Open config failed\n");
     return false;
   }
 
   if (serializeJsonPretty(newConfig, file) == 0) {
-    Serial.println("Error al escribir JSON actualizado");
+    DBG_ERROR("Write failed\n");
     file.close();
     return false;
   }
 
   file.close();
-  Serial.println("Configuración actualizada correctamente");
+  DBG_INFO("Config updated\n");
   return true;
 }
-
