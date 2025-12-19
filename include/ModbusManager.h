@@ -4,6 +4,7 @@
 #include <Arduino.h>
 #include <ModbusRTU.h>
 #include <HardwareSerial.h>
+#include "debug.h"
 
 class ModbusManager {
 public:
@@ -16,12 +17,12 @@ public:
         if (_initialized) {
             // If already initialized, check if config matches (optional warning)
             if (rx != _rx || tx != _tx || de != _de || baud != _baud) {
-                Serial.println("[ModbusMgr] Warning: Bus config mismatch, using existing config");
+                DBG_INFO("[ModbusMgr] Config mismatch, using existing\n");
             }
             return true;
         }
 
-        Serial.printf("[ModbusMgr] Initializing shared bus: RX=%d, TX=%d, DE=%d, baud=%d\n",
+        DBG_INFO("[ModbusMgr] RX=%d TX=%d DE=%d baud=%d\n",
                       rx, tx, de, baud);
 
         _serial = &Serial2;

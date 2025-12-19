@@ -4,6 +4,7 @@
 #include <vector>
 #include <Arduino.h>
 #include <ArduinoJson.h>
+#include "debug.h"
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include "sensors/ISensor.h"
@@ -16,6 +17,7 @@
 
 #ifdef ENABLE_RS485
   #include "sensors/ModbusTHSensor.h"
+  #include "sensors/ModbusSoil7in1Sensor.h"
 #endif
 
 class SensorManager {
@@ -38,7 +40,7 @@ public:
 
     void loadFromConfig(JsonDocument& config) {
         if (!config["sensors"].is<JsonArray>()) {
-            Serial.println("No sensors config found, using default capacitive");
+            DBG_INFO("No sensors config, using default capacitive\n");
             sensors.push_back(new SensorCapacitive());
             sensors[0]->init();
             return;
@@ -58,28 +60,28 @@ public:
                 ISensor* s = new SensorCapacitive(pin);
                 if (s->init()) {
                     sensors.push_back(s);
-                    Serial.printf("Capacitive sensor on pin %d added\n", pin);
+                    DBG_INFO("Capacitive sensor pin %d added\n", pin);
                 }
 
             } else if (strcmp(type, "scd30") == 0) {
                 ISensor* s = new SensorSCD30();
                 if (s->init()) {
                     sensors.push_back(s);
-                    Serial.println("SCD30 sensor added");
+                    DBG_INFO("SCD30 sensor added\n");
                 }
 
             } else if (strcmp(type, "bme280") == 0) {
                 ISensor* s = new SensorBME280();
                 if (s->init()) {
                     sensors.push_back(s);
-                    Serial.println("BME280 sensor added");
+                    DBG_INFO("BME280 sensor added\n");
                 }
 
             } else if (strcmp(type, "simulated") == 0) {
                 ISensor* s = new SensorSimulated();
                 if (s->init()) {
                     sensors.push_back(s);
-                    Serial.println("Simulated sensor added");
+                    DBG_INFO("Simulated sensor added\n");
                 }
 
             } else if (strcmp(type, "onewire") == 0) {
@@ -87,7 +89,7 @@ public:
                 bool scan = cfg["scan"] | true;
                 if (scan) {
                     int count = scanOneWire(pin);
-                    Serial.printf("OneWire: %d sensors detected on pin %d\n", count, pin);
+                    DBG_INFO("OneWire: %d sensors on pin %d\n", count, pin);
                 }
 
             }
@@ -117,10 +119,37 @@ public:
                     ISensor* s = new ModbusTHSensor(addr);
                     if (s->init()) {
                         sensors.push_back(s);
-                        Serial.printf("ModbusTH sensor (addr=%d) added\n", addr);
+                        DBG_INFO("ModbusTH addr=%d added\n", addr);
                     } else {
                         delete s;
-                        Serial.printf("ModbusTH sensor (addr=%d) init failed\n", addr);
+                        DBG_ERROR("ModbusTH addr=%d init failed\n", addr);
+                    }
+                }
+            }
+            else if (strcmp(type, "modbus_soil_7in1") == 0) {
+                // Modbus RTU 7-in-1 Soil Sensor (ZTS-3001-TR-ECTGNPKPH-N01)
+                // Measures: moisture, temperature, EC, pH, N, P, K
+                // Uses global RS485 bus configuration from config["rs485"]
+                // Default baud rate for this sensor is 4800
+
+                std::vector<uint8_t> addrList;
+
+                if (cfg["addresses"].is<JsonArray>()) {
+                    for (JsonVariant addr : cfg["addresses"].as<JsonArray>()) {
+                        addrList.push_back(addr.as<uint8_t>());
+                    }
+                } else {
+                    addrList.push_back(cfg["address"] | 1);
+                }
+
+                for (uint8_t addr : addrList) {
+                    ISensor* s = new ModbusSoil7in1Sensor(addr);
+                    if (s->init()) {
+                        sensors.push_back(s);
+                        DBG_INFO("ModbusSoil7in1 addr=%d added\n", addr);
+                    } else {
+                        delete s;
+                        DBG_ERROR("ModbusSoil7in1 addr=%d init failed\n", addr);
                     }
                 }
             }
@@ -136,15 +165,15 @@ public:
                 ISensor* s = new HD38Sensor(aPin, dPin, divider, invert, name);
                 if (s->init()) {
                     sensors.push_back(s);
-                    Serial.printf("HD38 sensor '%s' on pin %d added\n", name, aPin);
+                    DBG_INFO("HD38 '%s' pin %d added\n", name, aPin);
                 } else {
                     delete s;
-                    Serial.println("HD38 sensor init failed");
+                    DBG_ERROR("HD38 init failed\n");
                 }
             }
         }
 
-        Serial.printf("Total sensors active: %d\n", sensors.size());
+        DBG_INFO("Total sensors: %d\n", sensors.size());
     }
 
     int scanOneWire(int pin) {
@@ -201,12 +230,7 @@ public:
 
     // Get sensor identifier for logging
     String getSensorId(ISensor* sensor) const {
-        if (strcmp(sensor->getSensorType(), "OneWire") == 0) {
-            return ((SensorOneWire*)sensor)->getSensorID();
-        } else if (strcmp(sensor->getSensorType(), "Capacitive") == 0) {
-            return String(sensor->getSensorType()) + "_default";
-        }
-        return String(sensor->getSensorType());
+        return String(sensor->getSensorID());
     }
 };
 

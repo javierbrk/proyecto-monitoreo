@@ -4,6 +4,7 @@
 #include <Arduino.h>
 #include <HardwareSerial.h>
 #include "ModbusManager.h"
+#include "debug.h"
 
 class RS485Manager {
 private:
@@ -23,7 +24,7 @@ public:
     // Enable/disable raw serial sending
     void setRawSendEnabled(bool enabled) {
         rawSendEnabled = enabled;
-        Serial.printf("[RS485] Raw send %s\n", enabled ? "enabled" : "disabled");
+        DBG_INFO("[RS485] Raw send %s\n", enabled ? "on" : "off");
     }
 
     bool isRawSendEnabled() const {
@@ -39,7 +40,7 @@ public:
             rePin = dePin; // Assume shared DE/RE pin logic from Modbus config
             useDERE = (dePin >= 0);
             
-            Serial.println("[RS485] Reusing ModbusManager serial connection");
+            DBG_INFO("[RS485] Reusing ModbusMgr serial\n");
             return true;
         }
 
@@ -61,13 +62,13 @@ public:
             pinMode(rePin, OUTPUT);
             setReceiveMode();  // Default to receive mode
             useDERE = true;
-            Serial.printf("RS485 inicializado con control DE/RE (pins %d,%d)\n", dePin, rePin);
+            DBG_INFO("[RS485] DE/RE pins %d,%d\n", dePin, rePin);
         } else {
             useDERE = false;
-            Serial.println("RS485 inicializado sin control DE/RE (puenteado)");
+            DBG_INFO("[RS485] No DE/RE (bridged)\n");
         }
 
-        Serial.printf("RS485: RX=%d, TX=%d, Baud=%d\n", rxPin, txPin, baudRate);
+        DBG_INFO("[RS485] RX=%d TX=%d baud=%d\n", rxPin, txPin, baudRate);
         return true;
     }
 
@@ -120,7 +121,7 @@ public:
         }
 
         send(message + "\r\n");
-        Serial.println("[RS485 TX] " + message);
+        DBG_VERBOSE("[RS485 TX] %s\n", message.c_str());
     }
 
     // Receive data (for bidirectional communication)

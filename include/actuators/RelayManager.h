@@ -4,6 +4,7 @@
 #include <vector>
 #include <ArduinoJson.h>
 #include "RelayModule2CH.h"
+#include "../debug.h"
 
 class RelayManager {
 private:
@@ -21,12 +22,12 @@ public:
         relays.clear();
 
         if (!doc["relays"].is<JsonArray>()) {
-            Serial.println("[RelayMgr] No 'relays' array in config");
+            DBG_INFO("[RelayMgr] No relays in config\n");
             return;
         }
 
         JsonArrayConst relayArray = doc["relays"].as<JsonArrayConst>();
-        Serial.printf("[RelayMgr] Found %d relays in config\n", relayArray.size());
+        DBG_INFO("[RelayMgr] Found %d relays\n", relayArray.size());
 
         for (JsonObjectConst r : relayArray) {
             bool enabled = r["enabled"].as<bool>();
@@ -34,9 +35,9 @@ public:
                 uint8_t addr = r["config"]["address"] | 1;
                 String alias = r["config"]["alias"] | "";
                 relays.push_back(new RelayModule2CH(addr, alias));
-                Serial.printf("[RelayMgr] Added relay: Addr=%d, Alias='%s'\n", addr, alias.c_str());
+                DBG_INFO("[RelayMgr] Added: Addr=%d '%s'\n", addr, alias.c_str());
             } else {
-                Serial.println("[RelayMgr] Relay found but disabled");
+                DBG_VERBOSE("[RelayMgr] Relay disabled\n");
             }
         }
     }

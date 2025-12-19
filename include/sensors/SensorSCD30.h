@@ -1,10 +1,14 @@
 #ifndef SENSOR_SCD30_H
 #define SENSOR_SCD30_H
-//TODO: este pude ser serial ... no solo i2c ... lo venimos usando por serial
-#include "ISensor.h"
-#include <Adafruit_SCD30.h>
 
-class SensorSCD30 : public ISensor {
+#include "ISensor.h"
+#include "ITemperatureSensor.h"
+#include "IHumiditySensor.h"
+#include "ICO2Sensor.h"
+#include <Adafruit_SCD30.h>
+#include "../debug.h"
+
+class SensorSCD30 : public ITemperatureSensor, public IHumiditySensor, public ICO2Sensor {
 private:
     Adafruit_SCD30 scd30;
     bool active;
@@ -13,12 +17,14 @@ private:
     float co2;
 
 public:
-    SensorSCD30() : active(false), temperature(99), humidity(100), co2(999999) {}
+    SensorSCD30() : active(false), temperature(999), humidity(100), co2(999999) {}
 
     bool init() override {
         active = scd30.begin();
         if (!active) {
-            Serial.println("No se pudo inicializar el sensor SCD30!");
+            DBG_ERROR("[SCD30] Init failed\n");
+        } else {
+            DBG_INFO("[SCD30] OK\n");
         }
         return active;
     }
@@ -31,7 +37,7 @@ public:
         if (!active) return false;
 
         if (!scd30.read()) {
-            Serial.println("Error leyendo el sensor SCD30!");
+            DBG_ERROR("[SCD30] Read error\n");
             return false;
         }
 
@@ -41,23 +47,29 @@ public:
         return true;
     }
 
+    // ITemperatureSensor
     float getTemperature() override { return temperature; }
+
+    // IHumiditySensor
     float getHumidity() override { return humidity; }
+
+    // ICO2Sensor
     float getCO2() override { return co2; }
+
     const char* getSensorType() override { return "SCD30"; }
 
     const char* getSensorID() override {
         static char sensorId[16];
-        snprintf(sensorId, sizeof(sensorId), "i2c-0x%02X", SCD30_I2CADDR_DEFAULT);
+        snprintf(sensorId, sizeof(sensorId), "thc-i2c-0x%02X", SCD30_I2CADDR_DEFAULT);
         return sensorId;
     }
 
     const char* getMeasurementsString() override {
         static char measString[64];
-        snprintf(measString, sizeof(measString), "temp=%.2f,hum=%.2f,co2=%.2f", temperature, humidity, co2);
+        snprintf(measString, sizeof(measString), "temp=%.1f,hum=%.1f,co2=%.0f", temperature, humidity, co2);
         return measString;
     }
-    
+
     bool calibrate(float reference = 400) override {
         if (!active) return false;
         return scd30.forceRecalibrationWithReference((uint16_t)reference);

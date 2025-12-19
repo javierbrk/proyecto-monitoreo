@@ -10,6 +10,7 @@
 #include "version.h"
 #include <SPIFFS.h>
 #include <ArduinoJson.h>
+#include "debug.h"
 #include "sendDataGrafana.h"
 #include "createGrafanaMessage.h"
 #include "constants.h"
@@ -21,11 +22,18 @@
 
 #ifdef SENSOR_MULTI
   #include "SensorManager.h"
+  #include "sensors/ITemperatureSensor.h"
+  #include "sensors/IHumiditySensor.h"
+  #include "sensors/IMoistureSensor.h"
+  #include "sensors/ICO2Sensor.h"
   SensorManager sensorMgr;
   // Wrapper function for endpoints.cpp to access sensors without including full header
   std::vector<ISensor*>& getSensorList() { return sensorMgr.getSensors(); }
 #else
   #include "sensors/SensorFactory.h"
+  #include "sensors/ITemperatureSensor.h"
+  #include "sensors/IHumiditySensor.h"
+  #include "sensors/ICO2Sensor.h"
 #endif
 
 #ifdef ENABLE_RS485
@@ -74,14 +82,13 @@ volatile int meshBufferTail = 0;
 void onMeshDataReceived(const uint8_t* senderMAC, float temp, float hum, float co2, uint32_t seq, const char* sensorId) {
   // Calculate next buffer position
   int nextHead = (meshBufferHead + 1) % MESH_BUFFER_SIZE;
-  Serial.println(".");
 
   // Check if buffer is full
   if (nextHead == meshBufferTail) {
-    Serial.println("[MESH] ✗ Buffer full, dropping data");
+    DBG_ERROR("[MESH] Buffer full, dropping data\n");
     return;
   }
- Serial.println(".");
+
   // Store data in buffer
   memcpy(meshBuffer[meshBufferHead].senderMAC, senderMAC, 6);
 
@@ -90,30 +97,27 @@ void onMeshDataReceived(const uint8_t* senderMAC, float temp, float hum, float c
     meshBuffer[meshBufferHead].sensorId[sizeof(meshBuffer[meshBufferHead].sensorId) - 1] = '\0';
   } else {
     strcpy(meshBuffer[meshBufferHead].sensorId, "unknown");
-  }  
+  }
   meshBuffer[meshBufferHead].temp = temp;
   meshBuffer[meshBufferHead].hum = hum;
   meshBuffer[meshBufferHead].co2 = co2;
   meshBuffer[meshBufferHead].seq = seq;
   meshBuffer[meshBufferHead].valid = true;
- Serial.println(".");
+
   // Update head pointer (atomic for single-writer scenario)
   meshBufferHead = nextHead;
- Serial.println(".");
-  //Serial.printf("[ESP-NOW] Data buffered from sensor %d (seq=%lu)\n",
-               // senderMAC[5], seq);
 }
 
 String detectRole(const JsonDocument& config) {
-  Serial.println("\n[→ INFO] Auto-detectando rol del dispositivo...");
+  DBG_INFOLN("\n[INFO] Auto-detecting device role...");
 
   // 1. Check if WiFi is connected
   if (!wifiManager.isOnline()) {
-    Serial.println("  └─ Sin conexión WiFi → SENSOR mode");
+    DBG_INFOLN("  No WiFi -> SENSOR mode");
     return "sensor";
   }
 
-  Serial.println("  └─ WiFi conectado, verificando acceso a Grafana...");
+  DBG_INFOLN("  WiFi connected, checking Grafana...");
 
   // 2. Test Grafana connectivity
   String grafanaUrl = config["grafana_ping_url"] | "http://192.168.1.1/ping";
@@ -126,47 +130,35 @@ String detectRole(const JsonDocument& config) {
   http.end();
 
   if (httpCode > 0) {
-    Serial.printf("  └─ Grafana accesible (HTTP %d) → GATEWAY mode\n", httpCode);
+    DBG_INFO("  Grafana OK (HTTP %d) -> GATEWAY mode\n", httpCode);
     return "gateway";
   } else {
-    Serial.printf("  └─ Grafana inaccesible (error %d) → SENSOR mode\n", httpCode);
+    DBG_INFO("  Grafana unreachable (%d) -> SENSOR mode\n", httpCode);
     return "sensor";
   }
 }
 #endif
 
 void printBanner() {
-  Serial.println("\n\n");
-  Serial.println("  ╔═══════════════════════════════════════════════════╗");
-  Serial.println("  ║                                                   ║");
-  Serial.println("  ║      *---*         ALTERMUNDI          *---*      ║");
-  Serial.println("  ║     /     \\                           /     \\     ║");
-  Serial.println("  ║    *   *   *    Proyecto Monitoreo  *   *   *    ║");
-  Serial.println("  ║     \\ | | /         Sensores          \\ | | /     ║");
-  Serial.println("  ║      *---*                             *---*      ║");
-  Serial.println("  ║                                                   ║");
-  Serial.println("  ║   La pata tecnológica de ese otro mundo posible  ║");
-  Serial.println("  ╚═══════════════════════════════════════════════════╝");
-  Serial.println();
+  DBG_INFOLN("\n  ALTERMUNDI - Proyecto Monitoreo");
+  DBG_INFOLN("  La pata tecnologica de ese otro mundo posible\n");
 }
 
 void setup() {
-  Serial.begin(115200);
-  delay(500);  // Esperar estabilización serial
+  DEBUG_BEGIN(115200);
+  delay(500);
 
-  printBanner();
+  IF_INFO(printBanner());
 
-  Serial.println("[→ INFO] Iniciando sistema...");
+  DBG_INFOLN("[INFO] Starting system...");
   configTime(0, 0, "pool.ntp.org", "time.nist.gov");
 
-  Serial.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-  Serial.println("  INICIALIZACIÓN DEL SISTEMA");
-  Serial.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  DBG_INFOLN("=== SYSTEM INIT ===");
 
   if (!SPIFFS.begin(true)) {
-    Serial.println("[✗ ERR ] No se pudo montar SPIFFS");
+    DBG_ERRORLN("[ERR] SPIFFS mount failed");
   } else {
-    Serial.println("[✓ OK  ] SPIFFS montado correctamente");
+    DBG_INFOLN("[OK] SPIFFS mounted");
   }
 
   createConfigFile();
@@ -174,19 +166,20 @@ void setup() {
   // Load configuration ONCE for all modules
   JsonDocument config = loadConfig();
 
-  Serial.println("\n[→ INFO] Configuración cargada:");
-  String configOutput;
-  serializeJsonPretty(config, configOutput);
-  Serial.println(configOutput);
-  Serial.println("[✓ OK  ] Configuración impresa");
+  IF_VERBOSE({
+    DBG_INFOLN("\n[INFO] Config loaded:");
+    String configOutput;
+    serializeJsonPretty(config, configOutput);
+    DBG_INFOLN(configOutput.c_str());
+  });
 
   #ifdef ENABLE_RS485
-    Serial.println("\n[→ INFO] Configurando RS485...");
+    DBG_INFOLN("\n[INFO] Configuring RS485...");
     JsonObject rs485Cfg = config["rs485"];
     bool rs485Enabled = rs485Cfg["enabled"] | false;
 
     if (!rs485Enabled) {
-      Serial.println("[→ INFO] RS485/Modbus deshabilitado en configuración");
+      DBG_INFOLN("[INFO] RS485/Modbus disabled in config");
     } else {
       int rx = rs485Cfg["rx_pin"] | 16;
       int tx = rs485Cfg["tx_pin"] | 17;
@@ -194,8 +187,8 @@ void setup() {
       int baud = rs485Cfg["baudrate"] | 9600;
       bool rawSendEnabled = rs485Cfg["raw_send_enabled"] | false;
 
-      Serial.printf("[→ INFO] RS485 Bus: RX=%d, TX=%d, DE=%d, Baud=%d\n", rx, tx, de, baud);
-      Serial.printf("[→ INFO] RS485 Raw Send: %s\n", rawSendEnabled ? "habilitado" : "deshabilitado");
+      DBG_INFO("[INFO] RS485: RX=%d TX=%d DE=%d Baud=%d\n", rx, tx, de, baud);
+      DBG_VERBOSE("[INFO] RS485 Raw Send: %s\n", rawSendEnabled ? "enabled" : "disabled");
 
       // 1. Initialize ModbusManager first (Singleton owner of the bus)
       ModbusManager::getInstance().begin(rx, tx, de, baud);
@@ -204,32 +197,30 @@ void setup() {
       rs485.init(rx, tx, baud, de, de);
       rs485.setRawSendEnabled(rawSendEnabled);
 
-      Serial.println("[✓ OK  ] RS485/Modbus habilitado");
+      DBG_INFOLN("[OK] RS485/Modbus enabled");
       delay(100);
     }
   #endif
 
-  
-  Serial.println("\n[→ INFO] Inicializando sensores...");
+
+  DBG_INFOLN("\n[INFO] Initializing sensors...");
   #ifdef SENSOR_MULTI
     sensorMgr.loadFromConfig(config);
     int sensorCount = sensorMgr.getSensorCount();
-    Serial.printf("[✓ OK  ] Modo multi-sensor: %d sensor%s activo%s\n",
-                  sensorCount, sensorCount != 1 ? "es" : "", sensorCount != 1 ? "s" : "");
+    DBG_INFO("[OK] Multi-sensor: %d active\n", sensorCount);
 
-    // Listar sensores activos
-    for (auto* s : sensorMgr.getSensors()) {
-      if (s && s->isActive()) {
-        String sensorId = sensorMgr.getSensorId(s);
-        Serial.printf("  └─ %s\n", sensorId.c_str());
+    IF_VERBOSE({
+      for (auto* s : sensorMgr.getSensors()) {
+        if (s && s->isActive()) {
+          DBG_VERBOSE("  - %s\n", sensorMgr.getSensorId(s).c_str());
+        }
       }
-    }
+    });
 
   // Initialize Relays
-  Serial.println("\n[→ INFO] Inicializando Relés...");
+  DBG_INFOLN("\n[INFO] Initializing Relays...");
   relayMgr.loadFromConfig(config);
-  Serial.printf("[✓ OK  ] %d relés configurados\n", relayMgr.getRelays().size());
-     // Initialize relays to verify connection
+  DBG_INFO("[OK] %d relays configured\n", relayMgr.getRelays().size());
     for (auto* r : relayMgr.getRelays()) {
         if (r) r->init();
     }
@@ -237,12 +228,12 @@ void setup() {
     sensor = SensorFactory::createSensor();
     if (sensor) {
       if (sensor->init()) {
-        Serial.printf("[✓ OK  ] Sensor %s inicializado\n", sensor->getSensorType());
+        DBG_INFO("[OK] Sensor %s initialized\n", sensor->getSensorType());
       } else {
-        Serial.printf("[✗ ERR ] Error inicializando %s\n", sensor->getSensorType());
+        DBG_ERROR("[ERR] Init failed: %s\n", sensor->getSensorType());
       }
     } else {
-      Serial.println("[✗ ERR ] No se pudo crear el sensor");
+      DBG_ERRORLN("[ERR] Could not create sensor");
     }
   #endif
 
@@ -278,9 +269,7 @@ void setup() {
 
     // Add handler for undefined routes
   server.onNotFound([]() {
-      // Redirect all undefined routes to root page
-      Serial.println("Redirecting to root page for undefined route");
-      Serial.printf("Requested route: %s\n", server.uri().c_str());
+      DBG_VERBOSE("404 redirect: %s\n", server.uri().c_str());
       server.sendHeader("Location", "/", true);
       server.send(302, "text/plain", "");
   });
@@ -289,17 +278,15 @@ void setup() {
 
   server.enableCORS(true);
 
-  Serial.println("\n[→ INFO] Configurando WiFi Manager...");
+  DBG_INFOLN("\n[INFO] Configuring WiFi Manager...");
   wifiManager.setConnectionTimeout(15000);
   wifiManager.setMaxRetries(8);
   wifiManager.setValidationTimeout(30000);
   wifiManager.init(&server);
-  Serial.println("[✓ OK  ] WiFi Manager inicializado");
-
-
+  DBG_INFOLN("[OK] WiFi Manager initialized");
 
   #ifdef ENABLE_ESPNOW
-    Serial.println("\n[→ INFO] Configurando ESP-NOW...");
+    DBG_INFOLN("\n[INFO] Configuring ESP-NOW...");
     bool espnowEnabled = config["espnow_enabled"] | false;
 
     if (espnowEnabled) {
@@ -308,161 +295,138 @@ void setup() {
       String espnowMode;
 
       if (forcedMode != "") {
-        Serial.printf("[→ INFO] Modo forzado: %s\n", forcedMode.c_str());
+        DBG_INFO("[INFO] Forced mode: %s\n", forcedMode.c_str());
         espnowMode = forcedMode;
       } else {
-        // Auto-detection based on connectivity
         espnowMode = detectRole(config);
       }
 
       uint8_t espnowChannel = config["espnow_channel"] | 1;
 
-      // Validate channel is in valid range (1-13)
       if (espnowChannel < 1 || espnowChannel > 13) {
-        Serial.printf("[⚠ WARN] Canal inválido %d, usando canal 1\n", espnowChannel);
+        DBG_INFO("[WARN] Invalid channel %d, using 1\n", espnowChannel);
         espnowChannel = 1;
       }
 
-      Serial.printf("[→ INFO] Modo ESP-NOW: %s (canal %d)\n", espnowMode.c_str(), espnowChannel);
+      DBG_INFO("[INFO] ESP-NOW mode: %s (ch %d)\n", espnowMode.c_str(), espnowChannel);
 
       if (espnowMode == "gateway") {
-        // Gateway: use current WiFi channel if connected, otherwise use configured channel
         if (wifiManager.isOnline()) {
           uint8_t wifiChannel = WiFi.channel();
           if (wifiChannel >= 1 && wifiChannel <= 13) {
             espnowChannel = wifiChannel;
-            Serial.printf("[→ INFO] Gateway usando canal WiFi: %d\n", espnowChannel);
-          } else {
-            Serial.printf("[⚠ WARN] Canal WiFi inválido (%d), usando canal configurado: %d\n", wifiChannel, espnowChannel);
+            DBG_VERBOSE("[INFO] Gateway using WiFi channel: %d\n", espnowChannel);
           }
-        } else {
-          Serial.printf("[→ INFO] WiFi no conectado, gateway usando canal configurado: %d\n", espnowChannel);
         }
       }
 
       if (espnowMgr.init(espnowMode, espnowChannel)) {
-        Serial.println("[✓ OK  ] ESP-NOW inicializado");
+        DBG_INFOLN("[OK] ESP-NOW initialized");
 
         if (espnowMode == "sensor") {
-          // Sensor mode: attempt discovery
-          Serial.println("[→ INFO] Modo sensor: buscando gateway...");
+          DBG_INFOLN("[INFO] Sensor mode: searching gateway...");
           if (espnowMgr.waitForDiscovery()) {
-            Serial.println("[✓ OK  ] Gateway encontrado y emparejado");
+            DBG_INFOLN("[OK] Gateway found and paired");
           } else {
-            Serial.println("[⚠ WARN] Gateway no encontrado (reintentará automáticamente)");
+            DBG_INFOLN("[WARN] Gateway not found (will retry)");
           }
         } else {
-          // Gateway mode: register mesh data callback and start beacon
           espnowMgr.setMeshDataCallback(onMeshDataReceived);
-          Serial.println("[→ INFO] Modo gateway: broadcasting beacon + forwarding mesh data");
+          DBG_INFOLN("[INFO] Gateway mode: beacon + forwarding");
         }
       } else {
-        Serial.println("[✗ ERR ] Error inicializando ESP-NOW");
+        DBG_ERRORLN("[ERR] ESP-NOW init failed");
       }
     } else {
-      Serial.println("[→ INFO] ESP-NOW deshabilitado en configuración");
+      DBG_INFOLN("[INFO] ESP-NOW disabled in config");
     }
   #endif
 
   server.begin();
-  Serial.println("[✓ OK  ] Servidor web iniciado en puerto 80");
+  DBG_INFOLN("[OK] Web server started on port 80");
 
-  Serial.println("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-  Serial.println("  SISTEMA LISTO");
-  Serial.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-  Serial.println("\n  Punto de Acceso: " + wifiManager.getAPSSID());
-  Serial.println("  Configuración:   http://192.168.16.10");
-  Serial.println("  Panel Web:       http://<IP>/settings");
-  Serial.println("  Datos Sensores:  http://<IP>/data");
-  Serial.println("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-
+  DBG_INFOLN("\n=== SYSTEM READY ===");
+  DBG_INFO("  AP: %s\n", wifiManager.getAPSSID().c_str());
+  DBG_INFOLN("  Config: http://192.168.16.10");
+  DBG_INFOLN("  Data:   http://<IP>/data\n");
 }
 
 void loop() {
   wifiManager.update();
-  static unsigned long lastStatusPrint = 0;
-  if (millis() - lastStatusPrint > 30000) {  // Print status every 30 seconds
-      lastStatusPrint = millis();
 
+  IF_VERBOSE({
+    static unsigned long lastStatusPrint = 0;
+    if (millis() - lastStatusPrint > 30000) {
+      lastStatusPrint = millis();
       if (wifiManager.isOnline()) {
-          Serial.println("WiFi Status: Connected to " + wifiManager.getCurrentSSID());
-          Serial.println("IP Address: " + wifiManager.getLocalIP().toString());
+        DBG_VERBOSE("WiFi: %s IP: %s\n", wifiManager.getCurrentSSID().c_str(), wifiManager.getLocalIP().toString().c_str());
       } else {
-          Serial.println("WiFi Status: Disconnected - AP available at " + wifiManager.getAPSSID());
+        DBG_VERBOSE("WiFi: Disconnected, AP: %s\n", wifiManager.getAPSSID().c_str());
       }
-  }
+    }
+  });
+
   server.handleClient();
 
   #ifdef ENABLE_ESPNOW
-    // Update ESP-NOW (beacon broadcast for gateway, retry discovery for sensor)
     espnowMgr.update();
 
     // Process buffered mesh data (gateway only)
-    // This runs in main loop context, safe for HTTP calls
     while (meshBufferTail != meshBufferHead) {
       MeshDataBuffer* data = &meshBuffer[meshBufferTail];
-      Serial.printf("[MESH→GRAFANA] Processing buffered data from %02X:%02X:%02X:%02X:%02X:%02X (seq=%lu)\n",
-                 data->senderMAC[0], data->senderMAC[1], data->senderMAC[2], data->senderMAC[3], data->senderMAC[4], data->senderMAC[5], data->seq);
       if (data->valid) {
         char deviceid[32];
         snprintf(deviceid, sizeof(deviceid), "moni-%02X%02X%02X%02X%02X%02X",
                  data->senderMAC[0], data->senderMAC[1], data->senderMAC[2], data->senderMAC[3], data->senderMAC[4], data->senderMAC[5]);
 
-        Serial.printf("[MESH→GRAFANA] %s: T=%.1f H=%.1f CO2=%.0f (seq=%lu)\n",
-                      deviceid, data->temp, data->hum, data->co2, data->seq);
+        DBG_VERBOSE("[MESH] %s: T=%.1f H=%.1f CO2=%.0f\n", deviceid, data->temp, data->hum, data->co2);
 
-        // Now safe to make HTTP call from main loop
         sendDataGrafana(data->temp, data->hum, data->co2, data->sensorId, deviceid);
-
-        data->valid = false;  // Mark as processed
+        data->valid = false;
       }
-
-      // Move to next buffer entry
       meshBufferTail = (meshBufferTail + 1) % MESH_BUFFER_SIZE;
     }
   #endif
 
   unsigned long currentMillis = millis();
 
-  //// 1. Verificamos si hay que chequear actualizaciones
+  // Check for updates
   if (currentMillis - lastUpdateCheck >= UPDATE_INTERVAL) {
-    Serial.printf("Free heap before checking: %d bytes\n", ESP.getFreeHeap());
+    DBG_VERBOSE("Free heap: %d bytes\n", ESP.getFreeHeap());
     checkForUpdates();
-    Serial.printf("Free heap after checking: %d bytes\n", ESP.getFreeHeap());
     lastUpdateCheck = currentMillis;
   }
 
-  //// 2. Enviamos datos a Grafana cada 10 segundos
+  // Send data to Grafana every 10 seconds
   if (currentMillis - lastSendTime >= 10000) {
     lastSendTime = currentMillis;
 
     #ifdef SENSOR_MULTI
-      // Modo multi-sensor: leer y enviar todos los sensores
       sensorMgr.readAll();
-
-      Serial.printf("Free heap before sending: %d bytes\n", ESP.getFreeHeap());
 
       for (auto* s : sensorMgr.getSensors()) {
         if (s->isActive()) {
-          float temperature = s->getTemperature();
-          float humidity = s->getHumidity();
-          float co2 = s->getCO2();
+          float temperature = -999, humidity = -999, co2 = -999;
 
-          String sensorId = sensorMgr.getSensorId(s);
+          auto* tempSensor = dynamic_cast<ITemperatureSensor*>(s);
+          auto* humSensor = dynamic_cast<IHumiditySensor*>(s);
+          auto* moistSensor = dynamic_cast<IMoistureSensor*>(s);
+          auto* co2Sensor = dynamic_cast<ICO2Sensor*>(s);
 
-          Serial.printf("[%s] Temp: %.1f°C, Hum: %.1f%%, CO2: %.0fppm\n",
-                       s->getSensorID(), temperature, humidity, co2);
+          if (tempSensor) temperature = tempSensor->getTemperature();
+          if (humSensor) humidity = humSensor->getHumidity();
+          if (moistSensor) humidity = moistSensor->getMoisture();
+          if (co2Sensor) co2 = co2Sensor->getCO2();
 
-          // Enviar a Grafana
+          DBG_INFO("[%s] %s\n", s->getSensorID(), s->getMeasurementsString());
+
           sendDataGrafana(s->getMeasurementsString(), s->getSensorID());
 
           #ifdef ENABLE_RS485
-            // Enviar por RS485
             rs485.sendSensorData(temperature, humidity, co2, s->getSensorID());
           #endif
 
           #ifdef ENABLE_ESPNOW
-            // Enviar por ESP-NOW (solo si es sensor y está emparejado)
             if (espnowMgr.getMode() == "sensor" && espnowMgr.isPaired()) {
               espnowMgr.sendSensorData(temperature, humidity, co2, s->getSensorID());
             }
@@ -470,34 +434,31 @@ void loop() {
         }
       }
 
-      Serial.printf("Free heap after sending: %d bytes\n", ESP.getFreeHeap());
-
     #else
-      // Modo single sensor (backward compatible)
       float temperature = 99, humidity = 100, co2 = 999999;
 
       if (sensor && sensor->isActive() && sensor->dataReady()) {
         if (sensor->read()) {
-          temperature = sensor->getTemperature();
-          humidity = sensor->getHumidity();
-          co2 = sensor->getCO2();
+          auto* tempSensor = dynamic_cast<ITemperatureSensor*>(sensor);
+          auto* humSensor = dynamic_cast<IHumiditySensor*>(sensor);
+          auto* co2Sensor = dynamic_cast<ICO2Sensor*>(sensor);
 
-          Serial.printf("[%s] Temp: %.1f°C, Hum: %.1f%%, CO2: %.0fppm\n",
-                       sensor->getSensorType(), temperature, humidity, co2);
+          if (tempSensor) temperature = tempSensor->getTemperature();
+          if (humSensor) humidity = humSensor->getHumidity();
+          if (co2Sensor) co2 = co2Sensor->getCO2();
+
+          DBG_INFO("[%s] %s\n", sensor->getSensorType(), sensor->getMeasurementsString());
         } else {
-          Serial.println("Error leyendo el sensor!");
+          DBG_ERRORLN("Sensor read error!");
           return;
         }
       } else {
-        Serial.println("Sensor no listo, esperando...");
+        DBG_VERBOSELN("Sensor not ready...");
       }
 
-      Serial.printf("Free heap before sending: %d bytes\n", ESP.getFreeHeap());
       sendDataGrafana(sensor->getMeasurementsString(), sensor->getSensorID());
-      Serial.printf("Free heap after sending: %d bytes\n", ESP.getFreeHeap());
 
       #ifdef ENABLE_RS485
-        // También enviar datos por RS485
         rs485.sendSensorData(temperature, humidity, co2, sensor ? sensor->getSensorType() : "Unknown");
       #endif
     #endif
@@ -506,13 +467,13 @@ void loop() {
     for (auto* r : relayMgr.getRelays()) {
         if (r && r->isActive()) {
             r->syncState();
-            r->syncInputs(); 
-            
+            r->syncInputs();
+
             String data = r->getGrafanaString();
             String id = r->getAlias();
             if (id.length() == 0) id = "relay_" + String(r->getAddress());
             id.replace(" ", "_");
-            
+
             sendDataGrafana(data.c_str(), id.c_str());
         }
     }

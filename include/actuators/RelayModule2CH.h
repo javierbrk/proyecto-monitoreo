@@ -2,6 +2,7 @@
 #define RELAY_MODULE_2CH_H
 
 #include "../ModbusManager.h"
+#include "../debug.h"
 #include <Arduino.h>
 
 /**
@@ -36,7 +37,7 @@ private:
     static bool modbusCallback(Modbus::ResultCode event, uint16_t transactionId, void* data) {
         _cbComplete = true;
         _cbError = (event != Modbus::EX_SUCCESS);
-        Serial.printf("[Relay Modbus Callback] Result: %d\n", event);
+        DBG_VERBOSE("[Relay CB] %d\n", event);
         return true;
     }
 
@@ -64,21 +65,20 @@ public:
     }
 
     bool init() {
-        Serial.printf("[Relay %d] Initializing...\n", _address);
+        DBG_VERBOSE("[Relay %d] Init...\n", _address);
         if (!ModbusManager::getInstance().isInitialized()) {
-            Serial.printf("[Relay %d] Modbus manager not ready\n", _address);
+            DBG_ERROR("[Relay %d] Modbus not ready\n", _address);
             _active = false;
             return false;
         }
-        
-        // Test read to verify connectivity
+
         if (syncState()) {
             _active = true;
             _failureCount = 0;
-            Serial.printf("[Relay %d] Initialized successfully\n", _address);
+            DBG_INFO("[Relay %d] Init OK\n", _address);
         } else {
             _active = false;
-            Serial.printf("[Relay %d] Not responding\n", _address);
+            DBG_ERROR("[Relay %d] Not responding\n", _address);
         }
         return _active;
     }
@@ -90,12 +90,11 @@ public:
             return true;
         }
 
-        // If inactive, try to recover periodically
         _inactiveCheckCount++;
         if (_inactiveCheckCount >= 10) {
-            Serial.printf("[Relay %d] Attempting to recover connection...\n", _address);
+            DBG_VERBOSE("[Relay %d] Recovery attempt\n", _address);
             _inactiveCheckCount = 0;
-            return init(); // Attempt to re-initialize
+            return init();
         }
         return false;
     }
@@ -109,15 +108,15 @@ public:
         ModbusRTU* mb = ModbusManager::getInstance().getModbus();
         if (!mb) return false;
 
-        delay(20); // Allow slave to process previous command
+        delay(20);
 
-        Serial.printf("[Relay %d] Setting channel %d to %s\n", _address, channel, state ? "ON" : "OFF");
+        DBG_VERBOSE("[Relay %d] ch%d -> %s\n", _address, channel, state ? "ON" : "OFF");
 
         mb->task();
 
         _cbComplete = false;
         _cbError = false;
-        
+
         if (!mb->writeCoil(_address, channel, state, modbusCallback)) {
             return false;
         }
@@ -130,16 +129,16 @@ public:
 
         if (_cbComplete && !_cbError) {
             if (channel < 2) _relayState[channel] = state;
-            _failureCount = 0; // Reset on success
-            Serial.printf("[Relay %d] Set channel %d successful\n", _address, channel);
+            _failureCount = 0;
+            DBG_VERBOSE("[Relay %d] ch%d OK\n", _address, channel);
             return true;
         }
 
         _failureCount++;
-        Serial.printf("[Relay %d] Set channel %d FAILED (failures: %d)\n", _address, channel, _failureCount);
+        DBG_ERROR("[Relay %d] ch%d FAIL (%d)\n", _address, channel, _failureCount);
         if (_failureCount >= 5) {
             _active = false;
-            Serial.printf("[Relay %d] Disabled after 5 consecutive failures\n", _address);
+            DBG_ERROR("[Relay %d] Disabled\n", _address);
         }
         return false;
     }
@@ -160,16 +159,13 @@ public:
         ModbusRTU* mb = ModbusManager::getInstance().getModbus();
         if (!mb) return false;
 
-        delay(50); // Allow slave to process previous command
-
+        delay(50);
         mb->task();
 
         _cbComplete = false;
         _cbError = false;
-        
-        // Try reading 8 coils (byte alignment) which is often more compatible
+
         bool coils[8];
-        // Attempt block read, but don't return false immediately if it fails to start
         if (mb->readCoil(_address, 0, coils, 8, modbusCallback)) {
             unsigned long start = millis();
             while (!_cbComplete && millis() - start < 1000) {
@@ -177,20 +173,19 @@ public:
                 delay(10);
             }
         }
-        
+
         if (_cbComplete && !_cbError) {
             _relayState[0] = coils[0];
             _relayState[1] = coils[1];
-            _failureCount = 0; // Reset on success
-            Serial.printf("[Relay %d] syncState successful\n", _address);
-            Serial.printf("[Relay %d] Relay states: R0=%d, R1=%d\n", _address, _relayState[0], _relayState[1]);
+            _failureCount = 0;
+            DBG_VERBOSE("[Relay %d] sync R0=%d R1=%d\n", _address, _relayState[0], _relayState[1]);
             return true;
         }
         _failureCount++;
-        Serial.printf("[Relay %d] syncState FAILED (failures: %d)\n", _address, _failureCount);
+        DBG_ERROR("[Relay %d] sync FAIL (%d)\n", _address, _failureCount);
         if (_failureCount >= 5) {
             _active = false;
-            Serial.printf("[Relay %d] Disabled after 5 consecutive failures\n", _address);
+            DBG_ERROR("[Relay %d] Disabled\n", _address);
         }
         return false;
     }
@@ -199,38 +194,36 @@ public:
         ModbusRTU* mb = ModbusManager::getInstance().getModbus();
         if (!mb) return false;
 
-        Serial.printf("[Relay %d] Reading inputs...\n", _address);
-
         mb->task();
 
         _cbComplete = false;
         _cbError = false;
-        
-        bool inputs[8]; 
+
+        bool inputs[8];
         if (!mb->readIsts(_address, 0, inputs, 8, modbusCallback)) {
-            Serial.printf("[Relay %d] Error reading inputs\n", _address);
+            DBG_ERROR("[Relay %d] Input read error\n", _address);
             return false;
         }
-        
+
         unsigned long start = millis();
         while (!_cbComplete && millis() - start < 1000) {
             mb->task();
             delay(10);
         }
-        
+
         if (_cbComplete && !_cbError) {
             _inputState[0] = inputs[0];
             _inputState[1] = inputs[1];
-            _failureCount = 0; // Reset on success
-            Serial.printf("[Relay %d] Inputs read: IN1=%d, IN2=%d\n", _address, _inputState[0], _inputState[1]);
+            _failureCount = 0;
+            DBG_VERBOSE("[Relay %d] IN1=%d IN2=%d\n", _address, _inputState[0], _inputState[1]);
             return true;
         }
 
         _failureCount++;
-        Serial.printf("[Relay %d] Read inputs FAILED (failures: %d)\n", _address, _failureCount);
+        DBG_ERROR("[Relay %d] Input FAIL (%d)\n", _address, _failureCount);
         if (_failureCount >= 3) {
             _active = false;
-            Serial.printf("[Relay %d] Disabled after 3 consecutive failures\n", _address);
+            DBG_ERROR("[Relay %d] Disabled\n", _address);
         }
         return false;
     }

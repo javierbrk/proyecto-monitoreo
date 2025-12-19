@@ -364,6 +364,7 @@ const char* getConfigPageHTML() {
             { type: "scd30", enabled: true, config: {} },
             { type: "bme280", enabled: false, config: {} },
             { type: "modbus_th", enabled: false, config: { addresses: [1] } },
+            { type: "modbus_soil_7in1", enabled: false, config: { addresses: [1] } },
             { type: "onewire", enabled: false, config: { pin: 4, scan: true } },
             // Sensores
             { type: "capacitive", enabled: false, config: { pin: 34, name: "Soil1" } },
@@ -545,14 +546,28 @@ const char* getConfigPageHTML() {
                 case 'modbus_th':
                     // Support both 'addresses' array and legacy 'address' single value
                     // RS485 bus config is now global - sensor only needs addresses
-                    const addrList = config.addresses || (config.address ? [config.address] : [1]);
-                    const addrStr = Array.isArray(addrList) ? addrList.join(', ') : addrList;
+                    const addrListTH = config.addresses || (config.address ? [config.address] : [1]);
+                    const addrStrTH = Array.isArray(addrListTH) ? addrListTH.join(', ') : addrListTH;
                     return `
                         <div class="form-group">
                             <label for="sensor_${index}_addresses">Direcciones Modbus</label>
                             <input type="text" id="sensor_${index}_addresses"
-                                   value="${addrStr}" placeholder="1, 45, 3">
+                                   value="${addrStrTH}" placeholder="1, 45, 3">
                             <div class="info-text">Separar con comas para múltiples sensores. Usa la config RS485 global para pines y baudrate.</div>
+                        </div>
+                    `;
+
+                case 'modbus_soil_7in1':
+                    // 7-in-1 Soil Sensor (ZTS-3001-TR-ECTGNPKPH-N01)
+                    // Measures: moisture, temp, EC, pH, N, P, K
+                    const addrList7in1 = config.addresses || (config.address ? [config.address] : [1]);
+                    const addrStr7in1 = Array.isArray(addrList7in1) ? addrList7in1.join(', ') : addrList7in1;
+                    return `
+                        <div class="form-group">
+                            <label for="sensor_${index}_addresses">Direcciones Modbus</label>
+                            <input type="text" id="sensor_${index}_addresses"
+                                   value="${addrStr7in1}" placeholder="1, 2, 3">
+                            <div class="info-text">Sensor 7-en-1: Humedad, Temp, EC, pH, N, P, K. Baud rate recomendado: 4800.</div>
                         </div>
                     `;
 
@@ -729,7 +744,7 @@ const char* getConfigPageHTML() {
                         }
                     }
 
-                    if (sensor.type === 'modbus_th') {
+                    if (sensor.type === 'modbus_th' || sensor.type === 'modbus_soil_7in1') {
                         if (!sensor.config) sensor.config = {};
                         const addrInput = document.getElementById(`sensor_${index}_addresses`);
 

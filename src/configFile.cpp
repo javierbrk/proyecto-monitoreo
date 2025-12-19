@@ -5,23 +5,21 @@
 #include "configFile.h"
 #include "globals.h"
 #include "constants.h"
+#include "debug.h"
 
 
 
 void createConfigFile() {
-    
-    //SPIFFS.remove(path);
-
     if (SPIFFS.exists(CONFIG_FILE_PATH)) {
-      Serial.println("Archivo de configuración ya existe.");
+      DBG_VERBOSE("Config exists\n");
       return;
     }
-  
-    Serial.println("Creando archivo de configuración...");
-  
+
+    DBG_INFO("Creating config...\n");
+
     File file = SPIFFS.open(CONFIG_FILE_PATH, FILE_WRITE);
     if (!file) {
-      Serial.println("Error al abrir config.json para escritura.");
+      DBG_ERROR("Open config.json failed\n");
       return;
     }
   
@@ -89,9 +87,9 @@ void createConfigFile() {
     config["grafana_ping_url"] = "http://192.168.1.1/ping";  // URL for connectivity test
 
     if (serializeJsonPretty(config, file) == 0) {
-      Serial.println("Error al escribir JSON en archivo.");
+      DBG_ERROR("Write JSON failed\n");
     } else {
-      Serial.println("Archivo config.json creado correctamente.");
+      DBG_INFO("Config created\n");
     }
 
     file.close();
@@ -100,7 +98,7 @@ void createConfigFile() {
 String getConfigFile() {
   File file = SPIFFS.open(CONFIG_FILE_PATH, FILE_READ);
   if (!file || file.isDirectory()) {
-      Serial.println("Error al abrir config.json");
+      DBG_ERROR("Open config failed\n");
       return String();
   }
   String json = file.readString();
@@ -113,16 +111,15 @@ JsonDocument loadConfig() {
 
   File file = SPIFFS.open(CONFIG_FILE_PATH, FILE_READ);
   if (!file || file.isDirectory()) {
-      Serial.println("Error al abrir config.json para lectura");
-      return doc;  // Empty document
+      DBG_ERROR("Open config failed\n");
+      return doc;
   }
 
   DeserializationError error = deserializeJson(doc, file);
   file.close();
 
   if (error) {
-      Serial.print("Error deserializando config.json: ");
-      Serial.println(error.c_str());
+      DBG_ERROR("JSON error: %s\n", error.c_str());
       return doc;
   }
 
@@ -130,7 +127,7 @@ JsonDocument loadConfig() {
 
   // Automatic migration: add sensors array if missing
   if (!doc["sensors"].is<JsonArray>() || doc["sensors"].size() == 0) {
-      Serial.println("[→ INFO] Migrando configuración: agregando sensores por defecto");
+      DBG_INFO("Migrating: adding sensors\n");
 
       JsonArray sensors = doc["sensors"].to<JsonArray>();
 
@@ -165,7 +162,7 @@ JsonDocument loadConfig() {
 
   // Automatic migration: add relays array if missing
   if (!doc["relays"].is<JsonArray>()) {
-      Serial.println("[→ INFO] Migrando configuración: agregando relés por defecto");
+      DBG_INFO("Migrating: adding relays\n");
 
       JsonArray relays = doc["relays"].to<JsonArray>();
       JsonObject r1 = relays.add<JsonObject>();
@@ -180,7 +177,7 @@ JsonDocument loadConfig() {
 
   // Automatic migration: convert flat rs485_* fields to nested rs485 object
   if (!doc["rs485"].is<JsonObject>() && !doc["rs485_enabled"].isNull()) {
-      Serial.println("[→ INFO] Migrando configuración: convirtiendo RS485 a formato unificado");
+      DBG_INFO("Migrating: RS485 format\n");
 
       JsonObject rs485 = doc["rs485"].to<JsonObject>();
       rs485["enabled"] = doc["rs485_enabled"] | false;
@@ -217,7 +214,7 @@ JsonDocument loadConfig() {
 
   // Automatic migration: add rs485 object if completely missing
   if (!doc["rs485"].is<JsonObject>()) {
-      Serial.println("[→ INFO] Migrando configuración: agregando RS485 por defecto");
+      DBG_INFO("Migrating: adding RS485\n");
 
       JsonObject rs485 = doc["rs485"].to<JsonObject>();
       rs485["enabled"] = false;
@@ -232,12 +229,12 @@ JsonDocument loadConfig() {
 
   // Save migrated config if modified
   if (configModified) {
-      Serial.println("[→ INFO] Guardando configuración migrada...");
+      DBG_INFO("Saving migrated config...\n");
       File outFile = SPIFFS.open(CONFIG_FILE_PATH, FILE_WRITE);
       if (outFile) {
           serializeJsonPretty(doc, outFile);
           outFile.close();
-          Serial.println("[✓ OK  ] Configuración migrada guardada");
+          DBG_INFO("Migration saved\n");
       }
   }
 
@@ -245,25 +242,23 @@ JsonDocument loadConfig() {
 }
 
 bool updateConfig(JsonDocument& newConfig) {
-  // Remove existing config file
   if (SPIFFS.exists(CONFIG_FILE_PATH)) {
     SPIFFS.remove(CONFIG_FILE_PATH);
   }
 
-  // Write new config
   File file = SPIFFS.open(CONFIG_FILE_PATH, FILE_WRITE);
   if (!file) {
-    Serial.println("Error al abrir config.json para escritura");
+    DBG_ERROR("Open config failed\n");
     return false;
   }
 
   if (serializeJsonPretty(newConfig, file) == 0) {
-    Serial.println("Error al escribir JSON actualizado");
+    DBG_ERROR("Write failed\n");
     file.close();
     return false;
   }
 
   file.close();
-  Serial.println("Configuración actualizada correctamente");
+  DBG_INFO("Config updated\n");
   return true;
 }

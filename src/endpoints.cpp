@@ -8,16 +8,21 @@
 #include "configFile.h"
 #include "webConfigPage.h"
 #include "actuators/RelayManager.h"
+#include "debug.h"
 
 #include <ArduinoJson.h>
 
 #ifdef SENSOR_MULTI
   #include <vector>
   #include "sensors/ISensor.h"
-  // Forward declaration - SensorManager is defined in main.cpp
+  #include "sensors/ITemperatureSensor.h"
+  #include "sensors/IHumiditySensor.h"
+  #include "sensors/IMoistureSensor.h"
+  #include "sensors/ICO2Sensor.h"
+  #include "sensors/IPressureSensor.h"
+  #include "sensors/ISoilSensor.h"
   class SensorManager;
   extern SensorManager sensorMgr;
-  // We need access to getSensors(), so declare it here
   extern std::vector<ISensor*>& getSensorList();
 #endif
 
@@ -33,12 +38,36 @@ void handleMediciones() {
     String wifiStatus = "unknown";
     bool rotation = false;
 
+#ifdef SENSOR_MULTI
+    // Use first sensor that has temperature/humidity/co2
+    for (auto* s : getSensorList()) {
+        if (!s || !s->isActive() || !s->dataReady()) continue;
+        s->read();
+
+        auto* tempSensor = dynamic_cast<ITemperatureSensor*>(s);
+        auto* humSensor = dynamic_cast<IHumiditySensor*>(s);
+        auto* co2Sensor = dynamic_cast<ICO2Sensor*>(s);
+
+        if (tempSensor) temperature = tempSensor->getTemperature();
+        if (humSensor) humidity = humSensor->getHumidity();
+        if (co2Sensor) co2 = co2Sensor->getCO2();
+
+        wifiStatus = (WiFi.status() == WL_CONNECTED) ? "connected" : "disconnected";
+        break;  // Use first valid sensor
+    }
+#else
     if (sensor && sensor->isActive() && sensor->dataReady() && sensor->read()) {
-        temperature = sensor->getTemperature();
-        humidity = sensor->getHumidity();
-        co2 = sensor->getCO2();
+        auto* tempSensor = dynamic_cast<ITemperatureSensor*>(sensor);
+        auto* humSensor = dynamic_cast<IHumiditySensor*>(sensor);
+        auto* co2Sensor = dynamic_cast<ICO2Sensor*>(sensor);
+
+        if (tempSensor) temperature = tempSensor->getTemperature();
+        if (humSensor) humidity = humSensor->getHumidity();
+        if (co2Sensor) co2 = co2Sensor->getCO2();
+
         wifiStatus = (WiFi.status() == WL_CONNECTED) ? "connected" : "disconnected";
     }
+#endif
 
     JsonDocument doc;
     doc["rotation"] = rotation;
@@ -53,31 +82,24 @@ void handleMediciones() {
 
     doc["a_temperature"] = String(temperature, 2);
     doc["a_humidity"] = String(humidity, 2);
-    doc["a_co2"] = String(co2, 2); // HAY QUE AÑADIR ESTE A LA APLICACION
-    doc["wifi_status"] = wifiStatus;  
+    doc["a_co2"] = String(co2, 2);
+    doc["wifi_status"] = wifiStatus;
 
     String output;
     serializeJsonPretty(doc, output);
     server.send(200, "application/json", output);
 }
 
-// Helper to get sensor icon
-String getSensorIcon(const char* type) {
-    String t = String(type);
-    t.toLowerCase();
-    if (t.indexOf("scd30") >= 0 || t.indexOf("co2") >= 0) return "🌬️";
-    if (t.indexOf("bme") >= 0) return "🌡️";
-    if (t.indexOf("onewire") >= 0 || t.indexOf("ds18") >= 0) return "🌡️";
-    if (t.indexOf("capacitive") >= 0 || t.indexOf("hd38") >= 0 || t.indexOf("soil") >= 0) return "🌱";
-    if (t.indexOf("modbus") >= 0) return "📡";
+// Helper to get sensor icon based on capabilities
+String getSensorIcon(ISensor* s) {
+#ifdef SENSOR_MULTI
+    if (dynamic_cast<ICO2Sensor*>(s)) return "🌬️";
+    if (dynamic_cast<ISoilSensor*>(s)) return "🌱";
+    if (dynamic_cast<IMoistureSensor*>(s)) return "🌱";
+    if (dynamic_cast<IPressureSensor*>(s)) return "🌡️";
+    if (dynamic_cast<ITemperatureSensor*>(s)) return "🌡️";
+#endif
     return "📊";
-}
-
-// Check if sensor is soil moisture type (doesn't have temperature)
-bool isSoilSensor(const char* type) {
-    String t = String(type);
-    t.toLowerCase();
-    return (t.indexOf("capacitive") >= 0 || t.indexOf("hd38") >= 0 || t.indexOf("soil") >= 0);
 }
 
 void handleData() {
@@ -120,7 +142,6 @@ void handleData() {
     int sensorCount = 0;
 
 #ifdef SENSOR_MULTI
-    // Multi-sensor mode
     for (auto* s : getSensorList()) {
         if (!s) continue;
         sensorCount++;
@@ -129,53 +150,109 @@ void handleData() {
         bool hasData = isActive && s->dataReady();
         if (hasData) s->read();
 
-        float temp = hasData ? s->getTemperature() : -999;
-        float hum = hasData ? s->getHumidity() : -999;
-        float co2 = hasData ? s->getCO2() : -999;
+        // Check capabilities via interfaces
+        auto* tempSensor = dynamic_cast<ITemperatureSensor*>(s);
+        auto* humSensor = dynamic_cast<IHumiditySensor*>(s);
+        auto* moistSensor = dynamic_cast<IMoistureSensor*>(s);
+        auto* co2Sensor = dynamic_cast<ICO2Sensor*>(s);
+        auto* pressSensor = dynamic_cast<IPressureSensor*>(s);
+        auto* soilSensor = dynamic_cast<ISoilSensor*>(s);
 
         bool hasError = !isActive || !hasData;
         String cardClass = hasError ? " err" : "";
 
         html += "<div class='card" + cardClass + "'>";
         html += "<div class='hdr'>";
-        html += "<span class='type'>" + getSensorIcon(s->getSensorType()) + " " + String(s->getSensorType()) + "</span>";
+        html += "<span class='type'>" + getSensorIcon(s) + " " + String(s->getSensorType()) + "</span>";
         html += "<span class='id'>" + String(s->getSensorID()) + "</span>";
         html += "</div>";
         html += "<div class='vals'>";
 
-        bool isSoil = isSoilSensor(s->getSensorType());
+        bool hasAnyReading = false;
 
-        // Temperature (skip for soil sensors)
-        if (!isSoil && temp > -100 && temp < 100) {
-            String cls = (temp < 10 || temp > 35) ? " warn" : " ok";
-            html += "<div class='val" + cls + "'><span>🌡️ Temperatura</span><b>" + String(temp, 1) + "°C</b></div>";
-        }
-
-        // Humidity (show as "Humedad de suelo" for soil sensors)
-        if (hum >= 0 && hum <= 100) {
-            String cls, label;
-            if (isSoil) {
-                // Soil moisture: low is dry (warn), high is wet (ok)
-                cls = (hum < 30) ? " warn" : " ok";
-                label = "🌱 Humedad suelo";
-            } else {
-                cls = (hum < 30 || hum > 80) ? " warn" : " ok";
-                label = "💧 Humedad";
+        // Temperature
+        if (tempSensor && hasData) {
+            float temp = tempSensor->getTemperature();
+            if (temp > -100 && temp < 100) {
+                String cls = (temp < 10 || temp > 35) ? " warn" : " ok";
+                html += "<div class='val" + cls + "'><span>🌡️ Temperatura</span><b>" + String(temp, 1) + "°C</b></div>";
+                hasAnyReading = true;
             }
-            html += "<div class='val" + cls + "'><span>" + label + "</span><b>" + String(hum, 1) + "%</b></div>";
         }
 
-        // CO2 (skip for soil sensors)
-        if (!isSoil && co2 > 0 && co2 < 10000) {
-            String cls = co2 > 1000 ? " bad" : (co2 > 800 ? " warn" : " ok");
-            html += "<div class='val" + cls + "'><span>🌬️ CO₂</span><b>" + String((int)co2) + " ppm</b></div>";
+        // Air Humidity
+        if (humSensor && hasData) {
+            float hum = humSensor->getHumidity();
+            if (hum >= 0 && hum <= 100) {
+                String cls = (hum < 30 || hum > 80) ? " warn" : " ok";
+                html += "<div class='val" + cls + "'><span>💧 Humedad</span><b>" + String(hum, 1) + "%</b></div>";
+                hasAnyReading = true;
+            }
+        }
+
+        // Soil Moisture
+        if (moistSensor && hasData) {
+            float moist = moistSensor->getMoisture();
+            if (moist >= 0 && moist <= 100) {
+                String cls = (moist < 30) ? " warn" : " ok";
+                html += "<div class='val" + cls + "'><span>🌱 Humedad suelo</span><b>" + String(moist, 1) + "%</b></div>";
+                hasAnyReading = true;
+            }
+        }
+
+        // CO2
+        if (co2Sensor && hasData) {
+            float co2 = co2Sensor->getCO2();
+            if (co2 > 0 && co2 < 10000) {
+                String cls = co2 > 1000 ? " bad" : (co2 > 800 ? " warn" : " ok");
+                html += "<div class='val" + cls + "'><span>🌬️ CO₂</span><b>" + String((int)co2) + " ppm</b></div>";
+                hasAnyReading = true;
+            }
+        }
+
+        // Pressure
+        if (pressSensor && hasData) {
+            float press = pressSensor->getPressure();
+            if (press > 0) {
+                html += "<div class='val ok'><span>🔵 Presión</span><b>" + String(press, 1) + " hPa</b></div>";
+                hasAnyReading = true;
+            }
+        }
+
+        // Soil sensor extended data (EC, pH, NPK)
+        if (soilSensor && hasData) {
+            float ec = soilSensor->getEC();
+            float ph = soilSensor->getPH();
+            int nitrogen = soilSensor->getNitrogen();
+            int phosphorus = soilSensor->getPhosphorus();
+            int potassium = soilSensor->getPotassium();
+
+            if (ec >= 0) {
+                html += "<div class='val ok'><span>⚡ EC</span><b>" + String((int)ec) + " μS/cm</b></div>";
+                hasAnyReading = true;
+            }
+            if (ph >= 0) {
+                String cls = (ph < 5.5 || ph > 7.5) ? " warn" : " ok";
+                html += "<div class='val" + cls + "'><span>🧪 pH</span><b>" + String(ph, 1) + "</b></div>";
+                hasAnyReading = true;
+            }
+            if (nitrogen >= 0) {
+                html += "<div class='val ok'><span>🌿 N</span><b>" + String(nitrogen) + " mg/kg</b></div>";
+                hasAnyReading = true;
+            }
+            if (phosphorus >= 0) {
+                html += "<div class='val ok'><span>🔷 P</span><b>" + String(phosphorus) + " mg/kg</b></div>";
+                hasAnyReading = true;
+            }
+            if (potassium >= 0) {
+                html += "<div class='val ok'><span>🟡 K</span><b>" + String(potassium) + " mg/kg</b></div>";
+                hasAnyReading = true;
+            }
         }
 
         // If no valid readings
-        if ((isSoil || temp <= -100 || temp >= 100) && (hum < 0 || hum > 100) && (isSoil || co2 <= 0 || co2 >= 10000)) {
-            if (!isSoil || (hum < 0 || hum > 100)) {
-                html += "<div class='val'><span>Estado</span><b>" + String(isActive ? "Sin datos" : "Inactivo") + "</b></div>";
-            }
+        if (!hasAnyReading) {
+            html += "<div class='val'><span>Estado</span><b>" + String(isActive ? "Sin datos" : "Inactivo") + "</b></div>";
         }
 
         html += "</div></div>";
@@ -188,45 +265,70 @@ void handleData() {
         bool hasData = isActive && sensor->dataReady();
         if (hasData) sensor->read();
 
-        float temp = hasData ? sensor->getTemperature() : -999;
-        float hum = hasData ? sensor->getHumidity() : -999;
-        float co2 = hasData ? sensor->getCO2() : -999;
+        auto* tempSensor = dynamic_cast<ITemperatureSensor*>(sensor);
+        auto* humSensor = dynamic_cast<IHumiditySensor*>(sensor);
+        auto* moistSensor = dynamic_cast<IMoistureSensor*>(sensor);
+        auto* co2Sensor = dynamic_cast<ICO2Sensor*>(sensor);
+        auto* pressSensor = dynamic_cast<IPressureSensor*>(sensor);
 
         bool hasError = !isActive || !hasData;
         String cardClass = hasError ? " err" : "";
 
         html += "<div class='card" + cardClass + "'>";
         html += "<div class='hdr'>";
-        html += "<span class='type'>" + getSensorIcon(sensor->getSensorType()) + " " + String(sensor->getSensorType()) + "</span>";
+        html += "<span class='type'>📊 " + String(sensor->getSensorType()) + "</span>";
         html += "<span class='id'>" + String(sensor->getSensorID()) + "</span>";
         html += "</div>";
         html += "<div class='vals'>";
 
-        bool isSoil = isSoilSensor(sensor->getSensorType());
+        bool hasAnyReading = false;
 
-        if (!isSoil && temp > -100 && temp < 100) {
-            String cls = (temp < 10 || temp > 35) ? " warn" : " ok";
-            html += "<div class='val" + cls + "'><span>🌡️ Temperatura</span><b>" + String(temp, 1) + "°C</b></div>";
-        }
-        if (hum >= 0 && hum <= 100) {
-            String cls, label;
-            if (isSoil) {
-                cls = (hum < 30) ? " warn" : " ok";
-                label = "🌱 Humedad suelo";
-            } else {
-                cls = (hum < 30 || hum > 80) ? " warn" : " ok";
-                label = "💧 Humedad";
+        if (tempSensor && hasData) {
+            float temp = tempSensor->getTemperature();
+            if (temp > -100 && temp < 100) {
+                String cls = (temp < 10 || temp > 35) ? " warn" : " ok";
+                html += "<div class='val" + cls + "'><span>🌡️ Temperatura</span><b>" + String(temp, 1) + "°C</b></div>";
+                hasAnyReading = true;
             }
-            html += "<div class='val" + cls + "'><span>" + label + "</span><b>" + String(hum, 1) + "%</b></div>";
         }
-        if (!isSoil && co2 > 0 && co2 < 10000) {
-            String cls = co2 > 1000 ? " bad" : (co2 > 800 ? " warn" : " ok");
-            html += "<div class='val" + cls + "'><span>🌬️ CO₂</span><b>" + String((int)co2) + " ppm</b></div>";
-        }
-        if ((isSoil || temp <= -100 || temp >= 100) && (hum < 0 || hum > 100) && (isSoil || co2 <= 0 || co2 >= 10000)) {
-            if (!isSoil || (hum < 0 || hum > 100)) {
-                html += "<div class='val'><span>Estado</span><b>" + String(isActive ? "Sin datos" : "Inactivo") + "</b></div>";
+
+        if (humSensor && hasData) {
+            float hum = humSensor->getHumidity();
+            if (hum >= 0 && hum <= 100) {
+                String cls = (hum < 30 || hum > 80) ? " warn" : " ok";
+                html += "<div class='val" + cls + "'><span>💧 Humedad</span><b>" + String(hum, 1) + "%</b></div>";
+                hasAnyReading = true;
             }
+        }
+
+        if (moistSensor && hasData) {
+            float moist = moistSensor->getMoisture();
+            if (moist >= 0 && moist <= 100) {
+                String cls = (moist < 30) ? " warn" : " ok";
+                html += "<div class='val" + cls + "'><span>🌱 Humedad suelo</span><b>" + String(moist, 1) + "%</b></div>";
+                hasAnyReading = true;
+            }
+        }
+
+        if (co2Sensor && hasData) {
+            float co2 = co2Sensor->getCO2();
+            if (co2 > 0 && co2 < 10000) {
+                String cls = co2 > 1000 ? " bad" : (co2 > 800 ? " warn" : " ok");
+                html += "<div class='val" + cls + "'><span>🌬️ CO₂</span><b>" + String((int)co2) + " ppm</b></div>";
+                hasAnyReading = true;
+            }
+        }
+
+        if (pressSensor && hasData) {
+            float press = pressSensor->getPressure();
+            if (press > 0) {
+                html += "<div class='val ok'><span>🔵 Presión</span><b>" + String(press, 1) + " hPa</b></div>";
+                hasAnyReading = true;
+            }
+        }
+
+        if (!hasAnyReading) {
+            html += "<div class='val'><span>Estado</span><b>" + String(isActive ? "Sin datos" : "Inactivo") + "</b></div>";
         }
 
         html += "</div></div>";
@@ -239,23 +341,23 @@ void handleData() {
     if (!relayMgr.getRelays().empty()) {
         html += "<h1 style='margin-top:25px'>🔌 Relés / Actuadores</h1>";
         html += "<div class='cards'>";
-        
+
         for (auto* r : relayMgr.getRelays()) {
             if (!r) continue;
-            
+
             bool isActive = r->isActive();
             if (isActive) {
-                r->syncState(); // Sync with hardware
-                r->syncInputs(); // Sync inputs - DISABLED until fixed
+                r->syncState();
+                r->syncInputs();
             }
-            
+
             String cardClass = isActive ? "" : " err";
             html += "<div class='card" + cardClass + "' style='border-left-color:#0198fe'>";
             html += "<div class='hdr'>";
             html += "<span class='type'>Relé Modbus</span>";
             html += "<span class='id'>Addr: " + String(r->getAddress()) + "</span>";
             html += "</div>";
-            
+
             html += "<div class='vals'>";
             if (r->getAlias().length() > 0) {
                  html += "<div class='val' style='grid-column:span 2;background:none;text-align:left;padding:0 5px'><span>" + r->getAlias() + "</span></div>";
@@ -270,7 +372,6 @@ void handleData() {
                     html += "<span>Canal " + String(i+1) + "</span><b>" + label + "</b></div>";
                 }
 
-                // Add Input States - DISABLED until fixed
                 for(int i=0; i<2; i++) {
                     bool state = r->getInputState(i);
                     String cls = state ? "ok" : "warn";
@@ -311,11 +412,10 @@ void handleConfiguracion() {
         return;
     }
 
-    // Add dynamic data not stored in the file
     if (WiFi.status() == WL_CONNECTED) {
         doc["current_wifi_channel"] = WiFi.channel();
     } else {
-        doc["current_wifi_channel"] = 0; // 0 indicates not connected or channel not available
+        doc["current_wifi_channel"] = 0;
     }
 
     String output;
@@ -324,7 +424,7 @@ void handleConfiguracion() {
 }
 
 void habldePostConfig() {
-    Serial.println("Updating configuration...");
+    DBG_INFO("Updating config...\n");
 
     if (!server.hasArg("plain")) {
       server.send(400, "text/plain", "No JSON data received");
@@ -336,34 +436,30 @@ void habldePostConfig() {
     DeserializationError error = deserializeJson(doc, jsonString);
 
     if (error) {
-      Serial.print("deserializeJson() failed: ");
-      Serial.println(error.c_str());
+      DBG_ERROR("JSON parse error: %s\n", error.c_str());
       server.send(400, "text/plain", "Invalid JSON format");
       return;
     }
 
-    // Update WiFi if SSID changed
     const char* new_ssid = doc["ssid"];
     const char* new_password = doc["passwd"];
 
     if (new_ssid && strlen(new_ssid) > 0 && strcmp(new_ssid, "ToChange") != 0) {
       wifiManager.onChange(String(new_ssid), String(new_password));
-      Serial.printf("WiFi updated: %s\n", new_ssid);
+      DBG_INFO("WiFi updated: %s\n", new_ssid);
     }
 
-    // Save complete config to SPIFFS
     if (updateConfig(doc)) {
       server.send(200, "text/plain", "Configuration updated successfully. Some changes require restart.");
-      Serial.println("Configuration saved to SPIFFS");
+      DBG_INFO("Config saved\n");
     } else {
       server.send(500, "text/plain", "Failed to save configuration");
-      Serial.println("Failed to save configuration");
+      DBG_ERROR("Config save failed\n");
     }
-  }
+}
 
 void handleSCD30Calibration() {
-  Serial.printf("Endpoint /calibrate-scd30 called for sensor: %s\n",
-                sensor ? sensor->getSensorType() : "NULL");
+  DBG_VERBOSE("Calibration called: %s\n", sensor ? sensor->getSensorType() : "NULL");
 
   String response = "{";
   int httpStatus = 200;
@@ -375,7 +471,6 @@ void handleSCD30Calibration() {
       response += "\"calibration_performed\":false";
       httpStatus = 503;
   } else {
-      // Intentar calibración (solo algunos sensores la soportan)
       bool calibrationSuccess = sensor->calibrate(400);
 
       if (calibrationSuccess) {
@@ -386,7 +481,7 @@ void handleSCD30Calibration() {
           response += "\"calibration_performed\":true,";
           response += "\"target_co2\":400,";
           response += "\"note\":\"Allow 2-3 minutes for sensor to stabilize after calibration\"";
-          Serial.println("Sensor calibration successful!");
+          DBG_INFO("Calibration OK\n");
       } else {
           response += "\"status\":\"error\",";
           response += "\"message\":\"Calibration not supported or failed for " + String(sensor->getSensorType()) + "\",";
@@ -394,14 +489,12 @@ void handleSCD30Calibration() {
           response += "\"sensor_detected\":true,";
           response += "\"calibration_performed\":false";
           httpStatus = 500;
-          Serial.printf("Sensor %s calibration failed or not supported\n", sensor->getSensorType());
+          DBG_ERROR("Calibration failed: %s\n", sensor->getSensorType());
       }
   }
 
   response += "}";
-
   server.send(httpStatus, "application/json", response);
-  Serial.println("Calibration response sent: " + response);
 }
 
 void handleSettings() {
@@ -415,21 +508,18 @@ void handleRestart() {
 }
 
 void handleConfigReset() {
-  Serial.println("[→ INFO] Reseteando configuración completa...");
+  DBG_INFO("Resetting config...\n");
 
-  // Remove existing config file
   if (SPIFFS.exists(CONFIG_FILE_PATH)) {
     if (SPIFFS.remove(CONFIG_FILE_PATH)) {
-      Serial.println("[✓ OK  ] Config.json eliminado");
+      DBG_INFO("Config removed\n");
     } else {
-      Serial.println("[✗ ERR ] Error al eliminar config.json");
+      DBG_ERROR("Remove failed\n");
     }
   }
 
-  // Create new default config
   createConfigFile();
 
-  // Send response
   JsonDocument doc;
   doc["success"] = true;
   doc["message"] = "Configuration reset to defaults. Restarting...";
@@ -438,7 +528,7 @@ void handleConfigReset() {
   serializeJson(doc, output);
   server.send(200, "application/json", output);
 
-  Serial.println("[→ INFO] Reiniciando ESP32 con configuración por defecto...");
+  DBG_INFO("Restarting...\n");
   delay(1000);
   ESP.restart();
 }
@@ -450,19 +540,19 @@ void handleESPNowStatus() {
   JsonDocument config = loadConfig();
   bool espnowEnabled = config["espnow_enabled"] | false;
   String forcedMode = config["espnow_force_mode"] | "";
-  String actualMode = espnowMgr.getMode();  // Get actual running mode
+  String actualMode = espnowMgr.getMode();
 
   doc["enabled"] = espnowEnabled;
-  doc["mode"] = actualMode;  // Show actual mode (after auto-detection)
-  doc["forced_mode"] = forcedMode;  // Show configured forced mode
+  doc["mode"] = actualMode;
+  doc["forced_mode"] = forcedMode;
   doc["mac_address"] = espnowMgr.getMACAddress();
   doc["channel"] = (WiFi.status() == WL_CONNECTED) ? WiFi.channel() : 0;
 
   if (actualMode == "sensor") {
     doc["paired"] = espnowMgr.isPaired();
-    doc["peer_count"] = 0;  // Sensors don't track peers
+    doc["peer_count"] = 0;
   } else {
-    doc["paired"] = true;  // Gateway is always "paired"
+    doc["paired"] = true;
     doc["peer_count"] = espnowMgr.getActivePeerCount();
   }
 
@@ -475,19 +565,16 @@ void handleESPNowStatus() {
 void handleRelayList() {
     JsonDocument doc;
     JsonArray arr = doc.to<JsonArray>();
-    
+
     for(auto* r : relayMgr.getRelays()) {
         if(r) {
-            // Sync state before sending to get real status
             r->syncState();
-            // Parse the JSON string from the relay into the doc
-            // (Optimization: RelayModule2CH could return JsonObject, but string is fine)
             JsonDocument tempDoc;
             deserializeJson(tempDoc, r->getStatusJSON());
             arr.add(tempDoc);
         }
     }
-    
+
     String output;
     serializeJson(doc, output);
     server.send(200, "application/json", output);
@@ -498,10 +585,10 @@ void handleRelayToggle() {
         server.send(400, "text/plain", "Missing addr or ch param");
         return;
     }
-    
+
     int addr = server.arg("addr").toInt();
     int ch = server.arg("ch").toInt();
-    
+
     for(auto* r : relayMgr.getRelays()) {
         if(r->getAddress() == addr) {
             if(r->toggleRelay(ch)) {
@@ -512,6 +599,6 @@ void handleRelayToggle() {
             return;
         }
     }
-    
+
     server.send(404, "text/plain", "Relay not found");
 }
