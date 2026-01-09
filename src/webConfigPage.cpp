@@ -368,7 +368,7 @@ const char* getConfigPageHTML() {
             { type: "onewire", enabled: false, config: { pin: 4, scan: true } },
             // Sensores
             { type: "capacitive", enabled: false, config: { pin: 34, name: "Soil1" } },
-            { type: "hd38", enabled: false, config: { analog_pin: 35, digital_pin: -1, voltage_divider: true, invert_logic: false, name: "Suelo1" } }
+            { type: "hd38", enabled: false, config: { analog_pins: [35], voltage_divider: true, invert_logic: false } }
         ];
 
         const DEFAULT_RELAY_TEMPLATE = { 
@@ -572,24 +572,15 @@ const char* getConfigPageHTML() {
                     `;
 
                 case 'hd38':
+                    // Support both 'analog_pins' array and legacy 'analog_pin' single value
+                    const pinListHD38 = config.analog_pins || (config.analog_pin ? [config.analog_pin] : [35]);
+                    const pinStrHD38 = Array.isArray(pinListHD38) ? pinListHD38.join(', ') : pinListHD38;
                     return `
                         <div class="form-group">
-                            <label for="sensor_${index}_name">Nombre</label>
-                            <input type="text" id="sensor_${index}_name"
-                                   value="${config.name || 'Suelo1'}" placeholder="Suelo1">
-                        </div>
-                        <div class="inline-group">
-                            <div class="form-group">
-                                <label for="sensor_${index}_analog_pin">Pin Analógico</label>
-                                <input type="number" id="sensor_${index}_analog_pin"
-                                       value="${config.analog_pin || 35}" min="0" max="39">
-                            </div>
-                            <div class="form-group">
-                                <label for="sensor_${index}_digital_pin">Pin Digital</label>
-                                <input type="number" id="sensor_${index}_digital_pin"
-                                       value="${config.digital_pin !== undefined ? config.digital_pin : -1}" min="-1" max="39">
-                                <div class="info-text">-1 para desactivar</div>
-                            </div>
+                            <label for="sensor_${index}_analog_pins">Pines Analógicos</label>
+                            <input type="text" id="sensor_${index}_analog_pins"
+                                   value="${pinStrHD38}" placeholder="35, 34, 32">
+                            <div class="info-text">Separar con comas para múltiples sensores HD38</div>
                         </div>
                         <div class="form-group">
                             <input type="checkbox" id="sensor_${index}_voltage_divider"
@@ -767,15 +758,23 @@ const char* getConfigPageHTML() {
 
                     if (sensor.type === 'hd38') {
                         if (!sensor.config) sensor.config = {};
-                        const nameInput = document.getElementById(`sensor_${index}_name`);
-                        const analogPinInput = document.getElementById(`sensor_${index}_analog_pin`);
-                        const digitalPinInput = document.getElementById(`sensor_${index}_digital_pin`);
+                        const analogPinsInput = document.getElementById(`sensor_${index}_analog_pins`);
                         const voltageDividerInput = document.getElementById(`sensor_${index}_voltage_divider`);
                         const invertLogicInput = document.getElementById(`sensor_${index}_invert_logic`);
 
-                        if (nameInput) sensor.config.name = nameInput.value;
-                        if (analogPinInput) sensor.config.analog_pin = parseInt(analogPinInput.value);
-                        if (digitalPinInput) sensor.config.digital_pin = parseInt(digitalPinInput.value);
+                        // Parse comma-separated pins into array
+                        if (analogPinsInput) {
+                            const pinStr = analogPinsInput.value.trim();
+                            const pinArray = pinStr.split(',')
+                                .map(s => parseInt(s.trim()))
+                                .filter(n => !isNaN(n) && n >= 0 && n <= 39);
+                            sensor.config.analog_pins = pinArray.length > 0 ? pinArray : [35];
+                        }
+                        // Remove legacy single-pin field
+                        delete sensor.config.analog_pin;
+                        delete sensor.config.digital_pin;
+                        delete sensor.config.name;
+
                         if (voltageDividerInput) sensor.config.voltage_divider = voltageDividerInput.checked;
                         if (invertLogicInput) sensor.config.invert_logic = invertLogicInput.checked;
                     }
