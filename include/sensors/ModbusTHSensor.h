@@ -17,7 +17,7 @@
 class ModbusTHSensor : public ModbusSensorBase<2>, public ITemperatureSensor, public IHumiditySensor {
 private:
     float temperature = 999;
-    float humidity = 99;
+    float humidity = 999;
 
 protected:
     const char* getLogPrefix() const override {
