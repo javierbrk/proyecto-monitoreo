@@ -156,19 +156,36 @@ public:
 #endif
             else if (strcmp(type, "hd38") == 0) {
                 // HD-38 Soil Moisture sensor
-                int aPin = cfg["analog_pin"] | 35;
-                int dPin = cfg["digital_pin"] | -1;
+                // Support both 'analog_pins' array and legacy 'analog_pin' single value
                 bool divider = cfg["voltage_divider"] | true;
                 bool invert = cfg["invert_logic"] | false;
-                const char* name = cfg["name"] | "HD38";
 
-                ISensor* s = new HD38Sensor(aPin, dPin, divider, invert, name);
-                if (s->init()) {
-                    sensors.push_back(s);
-                    DBG_INFO("HD38 '%s' pin %d added\n", name, aPin);
+                std::vector<int> pinList;
+
+                if (cfg["analog_pins"].is<JsonArray>()) {
+                    // Multiple pins: [35, 34, 32]
+                    for (JsonVariant pin : cfg["analog_pins"].as<JsonArray>()) {
+                        pinList.push_back(pin.as<int>());
+                    }
                 } else {
-                    delete s;
-                    DBG_ERROR("HD38 init failed\n");
+                    // Single pin (backwards compatible)
+                    pinList.push_back(cfg["analog_pin"] | 35);
+                }
+
+                for (size_t i = 0; i < pinList.size(); i++) {
+                    int aPin = pinList[i];
+                    // Generate name based on pin number (like modbus uses address)
+                    char sensorName[16];
+                    snprintf(sensorName, sizeof(sensorName), "%d", aPin);
+
+                    ISensor* s = new HD38Sensor(aPin, -1, divider, invert, sensorName);
+                    if (s->init()) {
+                        sensors.push_back(s);
+                        DBG_INFO("HD38 '%s' pin %d added\n", sensorName, aPin);
+                    } else {
+                        delete s;
+                        DBG_ERROR("HD38 pin %d init failed\n", aPin);
+                    }
                 }
             }
         }
