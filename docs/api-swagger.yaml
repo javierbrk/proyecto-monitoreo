@@ -1,0 +1,954 @@
+openapi: 3.0.3
+info:
+  title: Firmware Monitoreo ESP32 API
+  description: |
+    API REST para dispositivos de monitoreo ambiental basados en ESP32.
+
+    ## Características
+    - Lectura de sensores (temperatura, humedad, CO2, presión, suelo)
+    - Control de relés Modbus
+    - Configuración del dispositivo
+    - Gestión de WiFi
+    - ESP-NOW mesh networking (opcional)
+
+    ## Conexión
+    - **Modo AP**: Conectar a la red WiFi del dispositivo (ej: `moni-AABBCCDD`)
+    - **Modo STA**: Usar la IP asignada por el router
+    - **IP por defecto en AP**: `192.168.4.1`
+  version: 1.0.0
+  contact:
+    name: Proyecto Monitoreo
+
+servers:
+  - url: http://{device_ip}
+    description: Dispositivo ESP32
+    variables:
+      device_ip:
+        default: "192.168.4.1"
+        description: IP del dispositivo (192.168.4.1 en modo AP)
+
+tags:
+  - name: Sensores
+    description: Lectura de datos de sensores
+  - name: Configuración
+    description: Gestión de configuración del dispositivo
+  - name: Relés
+    description: Control de actuadores Modbus
+  - name: WiFi
+    description: Gestión de conectividad WiFi
+  - name: ESP-NOW
+    description: Estado de mesh networking ESP-NOW
+  - name: Sistema
+    description: Operaciones del sistema
+  - name: Páginas HTML
+    description: Interfaces web (referencia)
+
+paths:
+  /actual:
+    get:
+      tags:
+        - Sensores
+      summary: Obtener datos actuales de sensores
+      description: |
+        Devuelve las lecturas actuales del primer sensor activo.
+        Los valores se devuelven como strings con 2 decimales.
+      operationId: getSensorData
+      responses:
+        '200':
+          description: Datos de sensores obtenidos exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SensorData'
+              example:
+                rotation: false
+                a_pressure: "1013.25"
+                errors:
+                  rotation: []
+                  temperature: []
+                  sensors: []
+                  humidity: []
+                  wifi: []
+                a_temperature: "25.50"
+                a_humidity: "60.00"
+                a_co2: "450.00"
+                wifi_status: "connected"
+
+  /config:
+    get:
+      tags:
+        - Configuración
+      summary: Obtener configuración completa
+      description: |
+        Devuelve toda la configuración del dispositivo incluyendo:
+        - Credenciales WiFi
+        - Parámetros de temperatura/humedad
+        - Configuración de sensores
+        - Configuración de relés
+        - Configuración RS485
+        - Configuración ESP-NOW
+      operationId: getConfiguration
+      responses:
+        '200':
+          description: Configuración obtenida exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Configuration'
+        '500':
+          description: Error al cargar configuración
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "No se pudo cargar config.json"
+
+    post:
+      tags:
+        - Configuración
+      summary: Actualizar configuración
+      description: |
+        Actualiza la configuración del dispositivo.
+        Enviar solo los campos que se desean modificar.
+        Algunos cambios requieren reinicio para aplicarse.
+      operationId: updateConfiguration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Configuration'
+            example:
+              ssid: "MiRedWiFi"
+              passwd: "password123"
+              min_temperature: 20.0
+              max_temperature: 30.0
+      responses:
+        '200':
+          description: Configuración actualizada
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: "Configuration updated successfully. Some changes require restart."
+        '400':
+          description: JSON inválido o datos faltantes
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: "Invalid JSON format"
+        '500':
+          description: Error al guardar configuración
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: "Failed to save configuration"
+
+  /config/reset:
+    post:
+      tags:
+        - Configuración
+      summary: Resetear configuración a valores de fábrica
+      description: |
+        Elimina la configuración actual y restaura los valores por defecto.
+        El dispositivo se reinicia automáticamente después del reset.
+      operationId: resetConfiguration
+      responses:
+        '200':
+          description: Reset exitoso, dispositivo reiniciando
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResetResponse'
+              example:
+                success: true
+                message: "Configuration reset to defaults. Restarting..."
+
+  /calibrate-scd30:
+    get:
+      tags:
+        - Sensores
+      summary: Calibrar sensor SCD30 CO2
+      description: |
+        Ejecuta la calibración forzada del sensor SCD30 a 400 ppm (nivel atmosférico).
+
+        **Importante**: Ejecutar en ambiente exterior o bien ventilado.
+        Esperar 2-3 minutos después de la calibración para estabilización.
+      operationId: calibrateSCD30
+      responses:
+        '200':
+          description: Calibración exitosa
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CalibrationResponse'
+              example:
+                status: "success"
+                message: "Sensor calibration completed successfully"
+                sensor_type: "SCD30"
+                sensor_detected: true
+                calibration_performed: true
+                target_co2: 400
+                note: "Allow 2-3 minutes for sensor to stabilize after calibration"
+        '500':
+          description: Calibración fallida o no soportada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CalibrationResponse'
+              example:
+                status: "error"
+                message: "Calibration not supported or failed for BME280"
+                sensor_type: "BME280"
+                sensor_detected: true
+                calibration_performed: false
+        '503':
+          description: Sin sensor activo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CalibrationResponse'
+              example:
+                status: "error"
+                message: "No sensor active"
+                sensor_detected: false
+                calibration_performed: false
+
+  /api/relays:
+    get:
+      tags:
+        - Relés
+      summary: Obtener lista de relés y su estado
+      description: |
+        Devuelve el estado actual de todos los relés Modbus configurados.
+        Incluye estado de canales de salida y entradas digitales.
+      operationId: getRelays
+      responses:
+        '200':
+          description: Lista de relés obtenida
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RelayState'
+              example:
+                - type: "relay_2ch"
+                  address: 1
+                  alias: "Ventilador"
+                  active: true
+                  state: [true, false]
+                  input_state: [true, true]
+                - type: "relay_2ch"
+                  address: 2
+                  alias: "Bomba"
+                  active: true
+                  state: [false, false]
+                  input_state: [false, true]
+
+  /api/relay/toggle:
+    post:
+      tags:
+        - Relés
+      summary: Toggle de canal de relé
+      description: |
+        Invierte el estado de un canal específico de un relé Modbus.
+      operationId: toggleRelay
+      parameters:
+        - name: addr
+          in: query
+          required: true
+          description: Dirección Modbus del relé (1-247)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 247
+          example: 1
+        - name: ch
+          in: query
+          required: true
+          description: Canal del relé (0 o 1)
+          schema:
+            type: integer
+            enum: [0, 1]
+          example: 0
+      responses:
+        '200':
+          description: Toggle exitoso
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: "OK"
+        '400':
+          description: Parámetros faltantes
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: "Missing addr or ch param"
+        '404':
+          description: Relé no encontrado
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: "Relay not found"
+        '500':
+          description: Error al ejecutar toggle
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: "Failed to toggle"
+
+  /wifi:
+    get:
+      tags:
+        - WiFi
+      summary: Escanear redes WiFi disponibles
+      description: |
+        Inicia o consulta un escaneo de redes WiFi.
+        El escaneo es asíncrono, puede requerir múltiples requests.
+
+        **Flujo típico**:
+        1. Primera llamada: inicia scan, retorna 202
+        2. Llamadas siguientes: retorna 202 mientras escanea
+        3. Cuando completa: retorna 200 con lista de redes
+      operationId: scanWiFi
+      responses:
+        '200':
+          description: Scan completado, lista de redes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WiFiScanResult'
+              example:
+                message: "success"
+                networks:
+                  - ssid: "MiRed"
+                    rssi: -45
+                  - ssid: "Vecino"
+                    rssi: -67
+        '202':
+          description: Scan en progreso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WiFiScanStatus'
+              example:
+                message: "scan in progress"
+                status: "scanning"
+        '408':
+          description: Timeout del scan (30s)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WiFiScanError'
+              example:
+                message: "scan timeout"
+                error: -3
+        '503':
+          description: WiFi no disponible o error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WiFiScanError'
+              example:
+                message: "WiFi is off"
+                error: -1
+
+  /save:
+    post:
+      tags:
+        - WiFi
+      summary: Guardar credenciales WiFi
+      description: |
+        Guarda nuevas credenciales WiFi e intenta conectar.
+        Usado principalmente por el captive portal.
+      operationId: saveWiFiCredentials
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required:
+                - ssid
+              properties:
+                ssid:
+                  type: string
+                  description: SSID de la red WiFi
+                password:
+                  type: string
+                  description: Contraseña de la red
+      responses:
+        '200':
+          description: Credenciales guardadas, intentando conectar
+          content:
+            text/html:
+              schema:
+                type: string
+              example: "<html>...Configuration Saved...Attempting to connect...</html>"
+        '400':
+          description: SSID vacío
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: "SSID cannot be empty"
+
+  /espnow/status:
+    get:
+      tags:
+        - ESP-NOW
+      summary: Obtener estado de ESP-NOW
+      description: |
+        Devuelve el estado actual de la funcionalidad ESP-NOW mesh.
+        Solo disponible si ESP-NOW está habilitado en la compilación.
+      operationId: getESPNowStatus
+      responses:
+        '200':
+          description: Estado de ESP-NOW
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ESPNowStatus'
+              example:
+                enabled: true
+                mode: "gateway"
+                forced_mode: ""
+                mac_address: "AA:BB:CC:DD:EE:FF"
+                channel: 6
+                paired: true
+                peer_count: 3
+
+  /restart:
+    post:
+      tags:
+        - Sistema
+      summary: Reiniciar dispositivo
+      description: |
+        Reinicia el ESP32. El dispositivo tardará unos segundos en volver a estar disponible.
+      operationId: restartDevice
+      responses:
+        '200':
+          description: Reinicio iniciado
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: "Restarting ESP32..."
+
+  /:
+    get:
+      tags:
+        - Páginas HTML
+      summary: Página principal / Captive Portal
+      description: |
+        Página HTML del captive portal para configuración WiFi.
+        Se muestra automáticamente al conectar al AP del dispositivo.
+      operationId: getCaptivePortal
+      responses:
+        '200':
+          description: Página HTML del captive portal
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /data:
+    get:
+      tags:
+        - Páginas HTML
+      summary: Dashboard de sensores
+      description: |
+        Página HTML con visualización de datos de sensores y relés.
+        Se actualiza automáticamente cada 10 segundos.
+      operationId: getDataPage
+      responses:
+        '200':
+          description: Página HTML del dashboard
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /settings:
+    get:
+      tags:
+        - Páginas HTML
+      summary: Página de configuración
+      description: |
+        Página HTML con formulario completo de configuración.
+        Permite modificar todos los parámetros del dispositivo.
+      operationId: getSettingsPage
+      responses:
+        '200':
+          description: Página HTML de configuración
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /favicon.svg:
+    get:
+      tags:
+        - Sistema
+      summary: Favicon SVG
+      description: Ícono del dispositivo en formato SVG
+      operationId: getFavicon
+      responses:
+        '200':
+          description: Favicon SVG
+          content:
+            image/svg+xml:
+              schema:
+                type: string
+
+components:
+  schemas:
+    SensorData:
+      type: object
+      description: Datos de sensores actuales
+      properties:
+        rotation:
+          type: boolean
+          description: Estado de rotación (legacy, siempre false)
+        a_pressure:
+          type: string
+          description: Presión atmosférica en hPa
+          example: "1013.25"
+        a_temperature:
+          type: string
+          description: Temperatura en °C
+          example: "25.50"
+        a_humidity:
+          type: string
+          description: Humedad relativa en %
+          example: "60.00"
+        a_co2:
+          type: string
+          description: Concentración de CO2 en ppm
+          example: "450.00"
+        wifi_status:
+          type: string
+          enum: [connected, disconnected, unknown]
+          description: Estado de conexión WiFi
+        errors:
+          $ref: '#/components/schemas/ErrorCollection'
+
+    ErrorCollection:
+      type: object
+      description: Colección de errores por categoría
+      properties:
+        rotation:
+          type: array
+          items:
+            type: string
+        temperature:
+          type: array
+          items:
+            type: string
+        sensors:
+          type: array
+          items:
+            type: string
+        humidity:
+          type: array
+          items:
+            type: string
+        wifi:
+          type: array
+          items:
+            type: string
+
+    Configuration:
+      type: object
+      description: Configuración completa del dispositivo
+      properties:
+        ssid:
+          type: string
+          description: SSID de la red WiFi a conectar
+          example: "MiRedWiFi"
+        passwd:
+          type: string
+          description: Contraseña WiFi
+          example: "password123"
+        incubator_name:
+          type: string
+          description: Nombre único del dispositivo
+          example: "moni-AABBCCDD"
+        hash:
+          type: string
+          description: MAC address sin separadores (identificador único)
+          example: "AABBCCDDEEFF"
+        min_temperature:
+          type: number
+          format: float
+          description: Temperatura mínima objetivo
+          example: 37.3
+        max_temperature:
+          type: number
+          format: float
+          description: Temperatura máxima objetivo
+          example: 37.7
+        min_hum:
+          type: integer
+          description: Humedad mínima objetivo (%)
+          example: 55
+        max_hum:
+          type: integer
+          description: Humedad máxima objetivo (%)
+          example: 65
+        rotation_duration:
+          type: integer
+          description: Duración de rotación en ms (legacy)
+          example: 50000
+        rotation_period:
+          type: integer
+          description: Período de rotación en ms (legacy)
+          example: 3600000
+        incubation_period:
+          type: integer
+          description: Período de incubación en días (legacy)
+          example: 18
+        tray_one_date:
+          type: integer
+          description: Timestamp bandeja 1 (legacy)
+        tray_two_date:
+          type: integer
+          description: Timestamp bandeja 2 (legacy)
+        tray_three_date:
+          type: integer
+          description: Timestamp bandeja 3 (legacy)
+        espnow_enabled:
+          type: boolean
+          description: Habilitar ESP-NOW mesh
+          example: false
+        espnow_force_mode:
+          type: string
+          enum: ["", "gateway", "sensor"]
+          description: |
+            Modo forzado de ESP-NOW:
+            - "": auto-detección
+            - "gateway": forzar modo gateway
+            - "sensor": forzar modo sensor
+          example: ""
+        espnow_channel:
+          type: integer
+          minimum: 1
+          maximum: 13
+          description: Canal WiFi para ESP-NOW
+          example: 1
+        beacon_interval_ms:
+          type: integer
+          description: Intervalo de beacons ESP-NOW en ms
+          example: 2000
+        discovery_timeout_ms:
+          type: integer
+          description: Timeout de descubrimiento ESP-NOW en ms
+          example: 15000
+        send_interval_ms:
+          type: integer
+          description: Intervalo de envío de datos en ms
+          example: 30000
+        grafana_ping_url:
+          type: string
+          format: uri
+          description: URL de ping para auto-detección de rol ESP-NOW
+          example: "http://grafana.local/ping"
+        current_wifi_channel:
+          type: integer
+          description: Canal WiFi actual (solo lectura, calculado)
+          readOnly: true
+          example: 6
+        rs485:
+          $ref: '#/components/schemas/RS485Config'
+        sensors:
+          type: array
+          description: Lista de sensores configurados
+          items:
+            $ref: '#/components/schemas/SensorConfig'
+        relays:
+          type: array
+          description: Lista de relés configurados
+          items:
+            $ref: '#/components/schemas/RelayConfig'
+
+    RS485Config:
+      type: object
+      description: Configuración del bus RS485/Modbus
+      properties:
+        enabled:
+          type: boolean
+          description: Habilitar comunicación RS485
+          example: true
+        rx_pin:
+          type: integer
+          description: Pin GPIO para RX
+          example: 16
+        tx_pin:
+          type: integer
+          description: Pin GPIO para TX
+          example: 17
+        de_pin:
+          type: integer
+          description: Pin GPIO para DE/RE (control de dirección)
+          example: 18
+        baudrate:
+          type: integer
+          enum: [9600, 19200, 38400, 57600, 115200]
+          description: Velocidad de comunicación
+          example: 9600
+        raw_send_enabled:
+          type: boolean
+          description: Habilitar envío de datos crudos por serial
+          example: false
+
+    SensorConfig:
+      type: object
+      description: Configuración de un sensor
+      required:
+        - type
+        - enabled
+      properties:
+        type:
+          type: string
+          enum: [scd30, bme280, capacitive, onewire, modbus_th, modbus_7in1, hd38]
+          description: |
+            Tipo de sensor:
+            - scd30: Sensor CO2/Temp/Humedad SCD30
+            - bme280: Sensor Presión/Temp/Humedad BME280
+            - capacitive: Sensor capacitivo de humedad de suelo
+            - onewire: Sensor de temperatura DS18B20
+            - modbus_th: Sensor Modbus temperatura/humedad
+            - modbus_7in1: Sensor Modbus 7-en-1 (suelo)
+            - hd38: Sensor analógico HD38
+          example: "scd30"
+        enabled:
+          type: boolean
+          description: Sensor habilitado
+          example: true
+        config:
+          type: object
+          description: Configuración específica del sensor
+          additionalProperties: true
+          properties:
+            pin:
+              type: integer
+              description: Pin GPIO (para capacitive, onewire)
+            name:
+              type: string
+              description: Nombre personalizado
+            scan:
+              type: boolean
+              description: Escanear dispositivos (onewire)
+            address:
+              type: integer
+              description: Dirección Modbus (modbus_*)
+
+    RelayConfig:
+      type: object
+      description: Configuración de un relé
+      required:
+        - type
+        - enabled
+      properties:
+        type:
+          type: string
+          enum: [relay_2ch]
+          description: Tipo de relé (actualmente solo relay_2ch)
+          example: "relay_2ch"
+        enabled:
+          type: boolean
+          description: Relé habilitado
+          example: true
+        config:
+          type: object
+          properties:
+            address:
+              type: integer
+              minimum: 1
+              maximum: 247
+              description: Dirección Modbus del relé
+              example: 1
+            alias:
+              type: string
+              description: Nombre descriptivo del relé
+              example: "Ventilador"
+
+    RelayState:
+      type: object
+      description: Estado actual de un relé
+      properties:
+        type:
+          type: string
+          description: Tipo de relé
+          example: "relay_2ch"
+        address:
+          type: integer
+          description: Dirección Modbus
+          example: 1
+        alias:
+          type: string
+          description: Nombre del relé
+          example: "Ventilador"
+        active:
+          type: boolean
+          description: Relé activo y comunicándose
+          example: true
+        state:
+          type: array
+          items:
+            type: boolean
+          minItems: 2
+          maxItems: 2
+          description: Estado de los canales de salida [CH1, CH2]
+          example: [true, false]
+        input_state:
+          type: array
+          items:
+            type: boolean
+          minItems: 2
+          maxItems: 2
+          description: Estado de las entradas digitales [IN1, IN2]
+          example: [true, true]
+
+    ESPNowStatus:
+      type: object
+      description: Estado de ESP-NOW mesh
+      properties:
+        enabled:
+          type: boolean
+          description: ESP-NOW habilitado en configuración
+          example: true
+        mode:
+          type: string
+          enum: [gateway, sensor]
+          description: Modo actual (gateway recibe datos, sensor envía)
+          example: "gateway"
+        forced_mode:
+          type: string
+          enum: ["", "gateway", "sensor"]
+          description: Modo forzado en configuración (vacío = auto)
+          example: ""
+        mac_address:
+          type: string
+          pattern: '^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$'
+          description: Dirección MAC del dispositivo
+          example: "AA:BB:CC:DD:EE:FF"
+        channel:
+          type: integer
+          minimum: 0
+          maximum: 13
+          description: Canal WiFi actual (0 si no conectado)
+          example: 6
+        paired:
+          type: boolean
+          description: Estado de emparejamiento
+          example: true
+        peer_count:
+          type: integer
+          minimum: 0
+          description: Número de peers conectados (solo en modo gateway)
+          example: 3
+
+    WiFiScanResult:
+      type: object
+      description: Resultado exitoso de scan WiFi
+      properties:
+        message:
+          type: string
+          example: "success"
+        networks:
+          type: array
+          items:
+            $ref: '#/components/schemas/WiFiNetwork'
+
+    WiFiScanStatus:
+      type: object
+      description: Estado de scan en progreso
+      properties:
+        message:
+          type: string
+          example: "scan in progress"
+        status:
+          type: string
+          example: "scanning"
+
+    WiFiScanError:
+      type: object
+      description: Error de scan WiFi
+      properties:
+        message:
+          type: string
+          example: "scan timeout"
+        error:
+          type: integer
+          description: Código de error WiFi
+          example: -3
+
+    WiFiNetwork:
+      type: object
+      description: Red WiFi detectada
+      properties:
+        ssid:
+          type: string
+          description: Nombre de la red
+          example: "MiRed"
+        rssi:
+          type: integer
+          minimum: -100
+          maximum: 0
+          description: Intensidad de señal en dBm
+          example: -45
+
+    CalibrationResponse:
+      type: object
+      description: Respuesta de calibración de sensor
+      properties:
+        status:
+          type: string
+          enum: [success, error]
+          description: Resultado de la calibración
+        message:
+          type: string
+          description: Mensaje descriptivo
+        sensor_type:
+          type: string
+          description: Tipo de sensor calibrado
+        sensor_detected:
+          type: boolean
+          description: Se detectó un sensor activo
+        calibration_performed:
+          type: boolean
+          description: Se ejecutó la calibración
+        target_co2:
+          type: integer
+          description: Valor objetivo de CO2 en ppm (solo si éxito)
+        note:
+          type: string
+          description: Nota adicional (solo si éxito)
+
+    ResetResponse:
+      type: object
+      description: Respuesta de reset de configuración
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: "Configuration reset to defaults. Restarting..."
+
+    Error:
+      type: object
+      description: Error genérico
+      properties:
+        error:
+          type: string
+          description: Mensaje de error
