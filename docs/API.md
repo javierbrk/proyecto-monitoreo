@@ -12,14 +12,14 @@ Endpoints HTTP del sistema de monitoreo.
 
 Lecturas actuales de sensores.
 
-**Response:**
+**Response (ejemplo real):**
 ```json
 {
   "rotation": false,
   "a_pressure": "99.00",
-  "a_temperature": "25.30",
-  "a_humidity": "60.50",
-  "a_co2": "450.00",
+  "a_temperature": "99.00",
+  "a_humidity": "100.00",
+  "a_co2": "999999.00",
   "wifi_status": "connected",
   "errors": {
     "rotation": [],
@@ -33,7 +33,7 @@ Lecturas actuales de sensores.
 
 **Códigos:**
 - `200`: OK
-- Valores default si sensor inactivo: temp=99, hum=100, co2=999999
+- Valores default si sensor inactivo: temp=99, hum=100, co2=999999, pressure=99
 
 ---
 
@@ -51,28 +51,39 @@ Vista HTML de datos de sensores.
 
 Configuración actual del sistema.
 
-**Response:** JSON con contenido completo de config.json
+**Response (ejemplo real):** JSON con contenido completo de config.json
+
 ```json
 {
-  "ssid": "MyWiFi",
-  "passwd": "password",
-  "incubator_name": "moni-AABBCCDDEE",
-  "hash": "AABBCCDDEE",
-  "min_temperature": 37.3,
   "max_temperature": 37.7,
-  "min_hum": 55,
+  "min_temperature": 37.3,
+  "rotation_duration": 50000,
+  "rotation_period": 3600000,
+  "ssid": "ToChange",
+  "passwd": "ToChange",
+  "incubation_period": 18,
   "max_hum": 65,
-  "rs485_enabled": false,
-  "rs485_rx": 16,
-  "rs485_tx": 17,
-  "rs485_baud": 9600,
+  "min_hum": 55,
+  "hash": "80F3DAACC7D4",
+  "incubator_name": "moni-80F3DAACC7D4",
+  "sensors": [
+    {"type": "scd30", "enabled": false, "config": {}},
+    {"type": "bme280", "enabled": false, "config": {}},
+    {"type": "modbus_th", "enabled": false, "config": {"addresses": [2,3,4,5,6,7,8,9,10,45]}},
+    {"type": "onewire", "enabled": true, "config": {"pin": 14, "scan": true}},
+    {"type": "capacitive", "enabled": false, "config": {"pin": 34, "name": "Soil1"}},
+    {"type": "hd38", "enabled": true, "config": {"voltage_divider": false, "invert_logic": false, "analog_pins": [35, 32]}}
+  ],
   "espnow_enabled": false,
-  "espnow_force_mode": "",
-  "espnow_channel": 1,
+  "espnow_force_mode": "gateway",
+  "espnow_channel": 11,
   "beacon_interval_ms": 2000,
+  "discovery_timeout_ms": 15000,
   "send_interval_ms": 30000,
-  "grafana_ping_url": "http://192.168.1.1/ping",
-  "sensors": [...]
+  "grafana_ping_url": "",
+  "current_wifi_channel": 11,
+  "relays": [{"type": "relay_2ch", "enabled": false, "config": {"alias": "Relay 01", "address": 1}}],
+  "rs485": {"enabled": false, "rx_pin": 16, "tx_pin": 17, "de_pin": 18, "baudrate": 9600, "raw_send_enabled": false}
 }
 ```
 
@@ -152,23 +163,31 @@ Reset a configuración default.
 Calibra sensor SCD30 a 400ppm.
 
 **Comportamiento:**
+
 - Solo funciona con sensor SCD30
 - Llama `sensor->calibrate(400.0)`
 - Requiere sensor activo e inicializado
 
-**Response (éxito):**
+**Response (sin sensor activo - ejemplo real):**
+
+```json
+{
+  "status": "error",
+  "message": "No sensor active",
+  "sensor_detected": false,
+  "calibration_performed": false
+}
+```
+
+**Response (con sensor SCD30 activo):**
+
 ```json
 {"status": "success", "message": "SCD30 calibrado a 400ppm"}
 ```
 
-**Response (error):**
-```json
-{"status": "error", "message": "Sensor no disponible o no es SCD30"}
-```
-
 **Códigos:**
-- `200`: Calibración ejecutada
-- `400`: Sensor no disponible o tipo incorrecto
+
+- `200`: Calibración ejecutada o error informado
 
 **Recomendación:** Ejecutar con sensor en ambiente 400ppm CO2 (aire exterior)
 
@@ -178,18 +197,38 @@ Calibra sensor SCD30 a 400ppm.
 
 Formulario web de configuración.
 
-**Response:** HTML con form completo
-- Inputs para WiFi
-- Selección de sensores
-- Config RS485
-- Config ESP-NOW
+**Response (ejemplo real):** HTML con form completo
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <title>Configuración - Monitor</title>
+    ...
+</head>
+```
+
+**Contenido:**
+
+- Inputs para WiFi (SSID, password)
+- Selección de sensores (SCD30, BME280, OneWire, etc.)
+- Config RS485 (pines, baudrate)
+- Config ESP-NOW (modo, canal)
 - Botones de gestión
 
 **Funciones del form:**
+
 - Submit POST a `/config`
 - Botón "Restart" → POST a `/restart`
 - Botón "Load Default Sensors" → carga config predefinida
 - Muestra estado actual de ESP-NOW en tiempo real
+
+**Códigos:**
+
+- `200`: OK
 
 ---
 
@@ -219,33 +258,99 @@ Reinicia el ESP32.
 
 Estado actual de ESP-NOW.
 
-**Response:**
+**Response (ejemplo real):**
+
 ```json
 {
-  "enabled": true,
-  "mode": "gateway",
-  "mac": "AA:BB:CC:DD:EE:FF",
-  "channel": 6,
-  "paired": true,
-  "peer_count": 3,
-  "gateway_mac": "11:22:33:44:55:66",
-  "gateway_rssi": -45
+  "enabled": false,
+  "mode": "sensor",
+  "forced_mode": "gateway",
+  "mac_address": "80:F3:DA:AC:C7:D4",
+  "channel": 11,
+  "paired": false,
+  "peer_count": 0
 }
 ```
 
 **Campos:**
+
 - `enabled`: ESP-NOW habilitado en config
 - `mode`: "gateway", "sensor", o "disabled"
-- `mac`: Dirección MAC del dispositivo
+- `forced_mode`: Modo forzado en config (si está vacío, usa auto-detección)
+- `mac_address`: Dirección MAC del dispositivo
 - `channel`: Canal WiFi actual
 - `paired`: (solo sensor) Si encontró y se pareó con gateway
 - `peer_count`: (solo gateway) Número de sensores pareados
-- `gateway_mac`: (solo sensor) MAC del gateway pareado
-- `gateway_rssi`: (solo sensor) Señal del gateway
 
 **Códigos:**
+
 - `200`: OK
-- Si ESP-NOW disabled: `enabled: false`, resto null/0
+- Si ESP-NOW disabled: `enabled: false`, resto con valores default
+
+---
+
+### GET /api/relays
+
+Lista de relays configurados.
+
+**Response (ejemplo real):**
+
+```json
+[]
+```
+
+**Response (con relays activos):**
+
+```json
+[
+  {
+    "address": 1,
+    "alias": "Relay 01",
+    "channels": 2,
+    "states": [false, false]
+  }
+]
+```
+
+**Campos:**
+
+- `address`: Dirección Modbus del relay
+- `alias`: Nombre descriptivo
+- `channels`: Número de canales
+- `states`: Array con estado de cada canal (true=ON, false=OFF)
+
+**Códigos:**
+
+- `200`: OK (array vacío si no hay relays configurados)
+
+---
+
+### POST /api/relay/toggle
+
+Cambia estado de un canal de relay.
+
+**Query params:**
+
+- `addr`: Dirección del relay (requerido)
+- `ch`: Número de canal (requerido, 0-indexed)
+
+**Ejemplo:**
+
+```bash
+curl -X POST "http://10.128.184.25/api/relay/toggle?addr=1&ch=0"
+```
+
+**Response:**
+
+```json
+{"status": "ok", "address": 1, "channel": 0, "new_state": true}
+```
+
+**Códigos:**
+
+- `200`: Toggle exitoso
+- `400`: Parámetros faltantes o inválidos
+- `404`: Relay no encontrado
 
 ---
 
@@ -253,13 +358,22 @@ Estado actual de ESP-NOW.
 
 Ícono del sitio.
 
-**Response:** SVG con logo AlterMundi
+**Response (si existe):** SVG con logo AlterMundi
+
 - Served from SPIFFS `/favicon.svg`
 - Content-Type: image/svg+xml
 
+**Response (ejemplo real - archivo no existe):**
+
+```http
+HTTP/1.1 302 Found
+Location: /
+```
+
 **Códigos:**
-- `200`: OK
-- `404`: Archivo no encontrado en SPIFFS
+
+- `200`: OK (archivo existe)
+- `302`: Redirect a `/` (archivo no existe en SPIFFS)
 
 ---
 
