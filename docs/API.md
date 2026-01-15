@@ -197,18 +197,38 @@ Calibra sensor SCD30 a 400ppm.
 
 Formulario web de configuración.
 
-**Response:** HTML con form completo
-- Inputs para WiFi
-- Selección de sensores
-- Config RS485
-- Config ESP-NOW
+**Response (ejemplo real):** HTML con form completo
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <title>Configuración - Monitor</title>
+    ...
+</head>
+```
+
+**Contenido:**
+
+- Inputs para WiFi (SSID, password)
+- Selección de sensores (SCD30, BME280, OneWire, etc.)
+- Config RS485 (pines, baudrate)
+- Config ESP-NOW (modo, canal)
 - Botones de gestión
 
 **Funciones del form:**
+
 - Submit POST a `/config`
 - Botón "Restart" → POST a `/restart`
 - Botón "Load Default Sensors" → carga config predefinida
 - Muestra estado actual de ESP-NOW en tiempo real
+
+**Códigos:**
+
+- `200`: OK
 
 ---
 
@@ -338,13 +358,22 @@ curl -X POST "http://10.128.184.25/api/relay/toggle?addr=1&ch=0"
 
 Ícono del sitio.
 
-**Response:** SVG con logo AlterMundi
+**Response (si existe):** SVG con logo AlterMundi
+
 - Served from SPIFFS `/favicon.svg`
 - Content-Type: image/svg+xml
 
+**Response (ejemplo real - archivo no existe):**
+
+```http
+HTTP/1.1 302 Found
+Location: /
+```
+
 **Códigos:**
-- `200`: OK
-- `404`: Archivo no encontrado en SPIFFS
+
+- `200`: OK (archivo existe)
+- `302`: Redirect a `/` (archivo no existe en SPIFFS)
 
 ---
 
