@@ -24,9 +24,18 @@ class SensorManager {
 private:
   std::vector<ISensor *> sensors;
   std::vector<DallasTemperature *> dallasInstances; // Para cleanup
+  uint16_t modbusDelayMs =
+      50; // Delay entre lecturas de sensores (configurable)
 
 public:
   SensorManager() {}
+
+  void setModbusDelay(uint16_t delayMs) {
+    modbusDelayMs = delayMs;
+    DBG_INFO("Modbus delay set to %dms\n", modbusDelayMs);
+  }
+
+  uint16_t getModbusDelay() const { return modbusDelayMs; }
 
   ~SensorManager() {
     // Cleanup
@@ -232,9 +241,16 @@ public:
       delay(100);
     }
 
-    // Read all sensors
+    // Read all sensors with configurable delay between readings
+    // This helps prevent bus collisions on RS485/Modbus
+    bool isFirst = true;
     for (auto *s : sensors) {
       if (s->isActive() && s->dataReady()) {
+        // Add delay between sensor readings (not before first one)
+        if (!isFirst && modbusDelayMs > 0) {
+          delay(modbusDelayMs);
+        }
+        isFirst = false;
         s->read();
       }
     }
