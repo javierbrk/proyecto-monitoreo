@@ -206,6 +206,11 @@ void setup() {
   DBG_INFOLN("\n[INFO] Initializing sensors...");
   #ifdef SENSOR_MULTI
     sensorMgr.loadFromConfig(config);
+    
+    // Configure delay between sensor readings (helps prevent RS485/Modbus collisions)
+    uint16_t modbusDelay = config["modbus_delay_ms"] | 50;
+    sensorMgr.setModbusDelay(modbusDelay);
+    
     int sensorCount = sensorMgr.getSensorCount();
     DBG_INFO("[OK] Multi-sensor: %d active\n", sensorCount);
 
