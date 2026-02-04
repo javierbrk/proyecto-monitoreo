@@ -43,7 +43,7 @@ jobs:
         mkdir -p binarios
         pio run -e esp32dev_multi            # Compila todo, incluyendo firmware.bin
         pio run -e esp32dev_multi --target buildfs   # También el SPIFFS
-        cp .pio/build/esp32dev_multi/firmware.bin binarios/firmaware.bin
+        cp .pio/build/esp32dev_multi/firmware.bin binarios/firmware.bin
         cp .pio/build/esp32dev_multi/spiffs.bin binarios/ || echo "No se generó spiffs.bin"
 
     - name: Get Version
