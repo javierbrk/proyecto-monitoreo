@@ -48,7 +48,7 @@ void checkForUpdates() {
       if (latestTag != FIRMWARE_VERSION) {
         const esp_partition_t* update_partition = esp_ota_get_next_update_partition(NULL);
 
-        String firmwareURL = "https://github.com/" + String(YOUR_GITHUB_USERNAME) + "/" + String(YOUR_REPO_NAME) + "/releases/download/" + latestTag + "/SendToGrafana.ino.bin";
+        String firmwareURL = "https://github.com/" + String(YOUR_GITHUB_USERNAME) + "/" + String(YOUR_REPO_NAME) + "/releases/download/" + latestTag + "/firmware.bin";
         DBG_INFO("OTA URL: %s\n", firmwareURL.c_str());
 
         HTTPClient redirectHttp;

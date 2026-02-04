@@ -24,16 +24,27 @@ jobs:
     - name: Install PlatformIO
       run: pip install platformio
 
-    - name: Create constants_private.h from example
-      run: cp include/constants_private.h.example include/constants_private.h
+    - name: Create constants_private.h from secrets
+      run: |
+        cat > include/constants_private.h << 'EOF'
+        #ifndef CONSTANTS_PRIVATE_H
+        #define CONSTANTS_PRIVATE_H
+
+        // Configuración privada - generado automáticamente en CI
+
+        const char* URL = "${{ secrets.GRAFANA_URL }}";
+        const char* TOKEN_GRAFANA = "${{ secrets.GRAFANA_TOKEN }}";
+
+        #endif
+        EOF
 
     - name: Build Firmware
       run: |
         mkdir -p binarios
-        pio run -e esp32dev            # Compila todo, incluyendo firmware.bin
-        pio run -e esp32dev --target buildfs   # También el SPIFFS
-        cp .pio/build/esp32dev/firmware.bin binarios/SendToGrafana.ino.bin
-        cp .pio/build/esp32dev/spiffs.bin binarios/ || echo "No se generó spiffs.bin"
+        pio run -e esp32dev_multi            # Compila todo, incluyendo firmware.bin
+        pio run -e esp32dev_multi --target buildfs   # También el SPIFFS
+        cp .pio/build/esp32dev_multi/firmware.bin binarios/firmaware.bin
+        cp .pio/build/esp32dev_multi/spiffs.bin binarios/ || echo "No se generó spiffs.bin"
 
     - name: Get Version
       id: get_version
