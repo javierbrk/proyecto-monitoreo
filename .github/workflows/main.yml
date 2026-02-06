@@ -45,6 +45,7 @@ jobs:
         pio run -e esp32dev_multi --target buildfs   # También el SPIFFS
         cp .pio/build/esp32dev_multi/firmware.bin binarios/firmware.bin
         cp .pio/build/esp32dev_multi/spiffs.bin binarios/ || echo "No se generó spiffs.bin"
+        cp build_reports/size_report_esp32dev_multi.txt binarios/ || echo "No se generaron reportes de build"
 
     - name: Get Version
       id: get_version
