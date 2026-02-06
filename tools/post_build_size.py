@@ -116,7 +116,7 @@ def post_build_size(source, target, env):
 
     env_name = env.get("PIOENV", "unknown")
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
+    git_version = subprocess.run(['git', 'rev-parse', 'HEAD'], capture_output=True, text=True).stdout.strip()
     # Build progress bars (20 chars wide)
     def make_bar(percent):
         filled = min(20, int(percent / 5))
@@ -130,6 +130,7 @@ def post_build_size(source, target, env):
                         BUILD MEMORY REPORT
 ================================================================================
 Environment: {env_name}
+Git version: {git_version}
 MCU:         {mcu}
 Timestamp:   {timestamp}
 Firmware:    {os.path.basename(firmware_path)}

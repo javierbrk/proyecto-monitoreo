@@ -14,5 +14,5 @@ compile_commands.json
 # Claude Code
 .claude/
 
-# Build reports (generados por CI)
-build_reports/
+# Build reports (generados por CI) deben ser incluidos no descomentar esta línea
+# build_reports/
