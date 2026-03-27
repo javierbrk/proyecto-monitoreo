@@ -86,6 +86,7 @@ void handleData() {
     html += "<meta charset='UTF-8'>";
     html += "<meta name='viewport' content='width=device-width,initial-scale=1'>";
     html += "<meta http-equiv='refresh' content='10'>";
+    html += "<link rel='icon' type='image/svg+xml' href='/favicon.svg'>";
     html += "<title>Datos - Monitor</title>";
     html += "<style>";
     html += ":root{--g:#55d400;--o:#F39100;--r:#dc3545}";
